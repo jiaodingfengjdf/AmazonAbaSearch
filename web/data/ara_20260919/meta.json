@@ -1,0 +1,15 @@
+{
+  "market": "COM",
+  "tableDate": "ara_20260919",
+  "generatedAt": "2026-09-24T06:11:29",
+  "minSearches": 5000,
+  "amazonHost": "www.amazon.com",
+  "rankGrowthType": "W1",
+  "reverseType": "W",
+  "marketId": 1,
+  "keywordCount": 49245,
+  "trendShards": 32,
+  "source": "/v3/api/aba-research",
+  "trendLabels": 14,
+  "shardSize": 1539
+}

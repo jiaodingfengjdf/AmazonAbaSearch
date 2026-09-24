@@ -1,0 +1,22 @@
+# Copy this file to config.yaml and fill in your own SellerSprite account.
+# config.yaml and cookie.txt stay local and are excluded from Git.
+market: COM
+market_id: 1
+reverse_type: W
+min_searches: 5000
+rank_growth_type: W1
+page_size: 1000
+min_interval: 0.4
+include_all_pass: true
+departments: []
+keep_weeks: 8
+serve: true
+host: 127.0.0.1
+port: 8766
+auto_login: true
+login:
+  account: ""
+  password: ""
+  headless: true
+  browser_channel: chrome
+cookie: ""

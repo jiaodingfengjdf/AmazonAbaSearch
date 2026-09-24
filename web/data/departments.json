@@ -1,0 +1,232 @@
+[
+  {
+    "guestId": null,
+    "code": "pets",
+    "label": "Pet Supplies",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "宠物用品",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "electronics",
+    "label": "Electronics",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "电子",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "beauty",
+    "label": "Beauty & Personal Care",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "美容化妆",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "lawngarden",
+    "label": "Garden & Outdoor",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "庭院、草坪和花园用品",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "baby-products",
+    "label": "Baby",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "母婴用品",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "handmade",
+    "label": "Handmade",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "手工艺品",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "mi",
+    "label": "Musical Instruments",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "乐器",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "any",
+    "label": "全部类目",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "全部分类",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "sporting",
+    "label": "Sports & Outdoors",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "运动户外休闲",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "arts-crafts",
+    "label": "Arts, Crafts & Sewing",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "艺术、工艺品和缝纫",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "automotive",
+    "label": "Automotive Parts & Accessories",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "汽车用品",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "tools",
+    "label": "Tools & Home Improvement",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "工具和家居装修",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "hpc",
+    "label": "Health, Household & Baby Care",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "个护健康",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "kitchen",
+    "label": "Home & Kitchen",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "厨具",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "computers",
+    "label": "Computers",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "电脑/IT",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "office-products",
+    "label": "Office Products",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "办公用品",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "mobile",
+    "label": "Cell Phones & Accessories",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "手机和配件",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "photo",
+    "label": "Camera and Photo",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "相机周边",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "industrial",
+    "label": "Industrial & Scientific",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "工业科学用品",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "grocery",
+    "label": "Grocery & Gourmet Food",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": null,
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "wireless",
+    "label": "Cell Phones & Accessories",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": null,
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "toys-and-games",
+    "label": "Toys & Games",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "玩具",
+    "guestVisited": false
+  },
+  {
+    "guestId": null,
+    "code": "fashion",
+    "label": "Clothing, Shoes & Jewelry",
+    "total": null,
+    "ratio": null,
+    "checked": null,
+    "translation": "流行/时尚",
+    "guestVisited": false
+  }
+]

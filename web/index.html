@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ABA 关键词趋势看板</title>
+  <link rel="icon" href="data:," />
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem('aba-theme') === 'dark' ? 'dark' : 'light'; } catch (_) {}</script>
+  <link rel="stylesheet" href="assets/style.css?v=17" />
+  <link rel="stylesheet" href="assets/agent.css?v=5" />
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">ABA</div>
+      <div>
+        <h1>关键词趋势看板</h1>
+        <p class="sub">SellerSprite ABA · 搜索量 ≥ <span id="metaMin">5,000</span> · 排名增长量 = 近一周（W1）</p>
+      </div>
+    </div>
+    <div class="week-picker">
+      <span class="wk-label">数据期</span>
+      <select id="weekSelect" title="切换 ABA 数据期（每周一期）"></select>
+      <span class="wk-hint" id="weekHint"></span>
+    </div>
+    <div class="chips" id="metaChips"></div>
+    <div class="actions">
+      <button id="themeToggle" class="btn theme-toggle" type="button" aria-label="切换深浅色主题">◐ 浅色</button>
+      <button id="agentOpenTop" class="btn agent-open" aria-controls="agentPanel" aria-expanded="false">✦ AI 研究员</button>
+      <div class="search-box">
+        <span class="ico">⌕</span>
+        <input id="globalSearch" type="search" placeholder="搜索关键词 / 中文 / 品牌 / ASIN" />
+      </div>
+      <button id="exportBtn" class="btn ghost" title="导出当前筛选结果为 CSV">导出 CSV</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="week-warn" id="weekWarn" style="display:none"></div>
+    <section class="kpis" id="kpis"></section>
+
+    <section class="charts">
+      <article class="card span2">
+        <header>
+          <h3>大盘周趋势</h3>
+          <span class="hint">全部入榜关键词的周搜索量合计 / 有效词量</span>
+        </header>
+        <div class="chart tall" id="chartMarket"></div>
+      </article>
+
+      <article class="card">
+        <header><h3>类目搜索量 TOP 12</h3><span class="hint">柱长=搜索量，颜色深浅=关键词数</span></header>
+        <div class="chart" id="chartDept"></div>
+      </article>
+
+      <article class="card">
+        <header><h3>类目关键词占比</h3><span class="hint">点击扇区可筛选表格</span></header>
+        <div class="chart" id="chartPie"></div>
+      </article>
+
+      <article class="card">
+        <header><h3>排名增幅榜 TOP 20</h3><span class="hint" id="chartGrowthHint">跟随「类目」筛选联动</span></header>
+        <div class="chart" id="chartGrowth"></div>
+      </article>
+
+      <article class="card">
+        <header><h3>蓝海四象限</h3><span class="hint" id="chartScatterHint">跟随「类目」筛选联动</span></header>
+        <div class="chart" id="chartScatter"></div>
+      </article>
+
+      <article class="card span2">
+        <header><h3>重点增长词周搜索量走势</h3><span class="hint" id="chartSeriesHint">跟随「类目」筛选联动</span></header>
+        <div class="chart tall" id="chartSeries"></div>
+      </article>
+    </section>
+
+    <section class="card table-card">
+      <header class="table-head">
+        <div>
+          <h3>关键词明细</h3>
+          <span class="hint" id="resultHint">—</span>
+        </div>
+        <div class="head-actions">
+          <button id="toggleFilter" class="btn ghost">收起筛选 ▲</button>
+          <button id="resetBtn" class="btn ghost">重置</button>
+        </div>
+      </header>
+      <div class="filters" id="filterPanel"></div>
+      <div class="table-wrap">
+        <table id="kwTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager" id="pager"></div>
+    </section>
+  </main>
+
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-panel">
+      <button class="drawer-close" id="drawerClose">×</button>
+      <div id="drawerBody"></div>
+    </div>
+  </aside>
+
+  <button id="agentLauncher" class="agent-launcher" aria-controls="agentPanel" aria-expanded="false" title="打开 ABA 研究员">✦<span>AI 研究员</span></button>
+  <div id="agentBackdrop" class="agent-backdrop" hidden></div>
+  <aside id="agentPanel" class="agent-panel" role="dialog" aria-labelledby="agentTitle" aria-hidden="true" inert>
+    <header class="agent-header">
+      <div class="agent-avatar" aria-hidden="true">✦</div>
+      <div class="agent-heading"><span class="agent-eyebrow">ABA RESEARCH</span><h2 id="agentTitle">你的数据研究搭档</h2></div>
+      <button id="agentNew" class="agent-icon-btn agent-new-btn" title="新建对话" aria-label="新建对话">＋ 新建</button>
+      <button id="agentClose" class="agent-icon-btn" title="收起面板" aria-label="收起研究员面板">×</button>
+    </header>
+    <div class="agent-specialties"><span>数据分析工程师</span><span>市场调研专家</span><span>亚马逊选品专家</span></div>
+    <div class="agent-conversation-bar"><label class="agent-sr-only" for="agentConversations">选择对话</label><select id="agentConversations" title="切换已保存的对话"></select><button id="agentClear" type="button" title="清除当前对话">清除对话</button></div>
+    <div id="agentMessages" class="agent-messages" role="log" aria-label="分析对话" aria-live="off">
+      <section id="agentWelcome" class="agent-welcome">
+        <div class="agent-welcome-mark" aria-hidden="true">✦</div>
+        <h3>全周期的数据，<br>更完整的选品判断。</h3>
+        <p>从市场发现到上线后监控，结合全部已采集周的关键词与 ASIN 数据开展研究。</p>
+        <div class="agent-prompts">
+          <button data-agent-prompt="基于全部已采集周和全类目，分析需求演变与竞争格局，指出值得继续研究的方向，并标明数据口径。"><span>↗ 全周期市场复盘</span><small>需求规模 · 类目格局 · 变化信号</small></button>
+          <button data-agent-prompt="基于全部已采集周，找出 5 个值得进一步研究的选品关键词。核查完整趋势与 ASIN，给出机会、竞争壁垒、反证和验证步骤。"><span>◎ 发现选品机会</span><small>增长趋势 · 集中度 · 进入门槛</small></button>
+          <button data-agent-prompt="从市场发现、需求验证、差异化、利润与合规、上架投放到上市后监控，给出一套基于当前可用数据的选品研究路径，并指出各阶段缺少哪些外部证据。"><span>⇄ 全流程选品研究</span><small>验证需求 · 核算利润 · 持续监控</small></button>
+          <button data-agent-prompt="基于已采集的完整历史，研究一个值得关注的关键词，从 Rufus / Alexa for Shopping 的公开机制出发，提出适用人群、使用场景与真实产品属性的研究方向，区分事实、推断和待验证假设。"><span>✧ Rufus 场景研究</span><small>搜索意图 · 产品属性 · 真实卖点</small></button>
+        </div>
+        <p class="agent-grounding">每条判断都应有数据依据。也可以先打开关键词详情，再点击「让 AI 分析」。</p>
+      </section>
+    </div>
+    <div class="agent-live-status" id="agentLive" role="status" aria-live="polite"></div>
+    <form id="agentForm" class="agent-composer">
+      <label for="agentInput" class="agent-sr-only">输入分析问题</label>
+      <textarea id="agentInput" rows="3" maxlength="6000" placeholder="想研究哪个关键词、ASIN 或选品方向？"></textarea>
+      <div class="agent-composer-actions"><span>Enter 发送 · Shift + Enter 换行</span><button id="agentStop" type="button" class="btn" hidden>停止生成</button><button id="agentSend" type="submit" class="btn agent-send">发送 ↑</button></div>
+    </form>
+    <footer class="agent-footer"><span>DeepSeek · 基于已采集数据分析</span><button id="agentExport" type="button">导出对话 ↓</button></footer>
+  </aside>
+
+  <div class="loading" id="loading"><div class="spinner"></div><span id="loadingText">加载数据…</span></div>
+
+  <script src="assets/vendor/echarts.min.js"></script>
+  <script src="assets/app.js?v=23"></script>
+  <script src="assets/agent.js?v=4"></script>
+</body>
+</html>

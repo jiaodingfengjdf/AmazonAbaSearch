@@ -1,0 +1,12 @@
+# 登录态与本地数据不入库
+cookie.txt
+config.yaml
+*.env
+.env.*
+db/*.sqlite
+db/*.sqlite-*
+logs/
+output/
+__pycache__/
+*.pyc
+agent.local.json

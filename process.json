@@ -1,0 +1,26 @@
+{
+  "name": "ABA 关键词趋势看板（全类目周更）",
+  "description": "每周四 06:00 自动打开 Chrome 登录卖家精灵刷新 Cookie，然后全量抓取 ABA 全部 22 个大类（周表 · 搜索量≥5000 · 排名增长量近一周）写入 SQLite 并重建看板；数据按周独立留档，看板顶部「数据期」下拉可切换历史周；关键词详情抽屉展示该词自然位 TOP10 ASIN（图片 / 价格趋势 / BSR / 评分数 / 上架时间等维度）。看板常驻 http://127.0.0.1:8766",
+  "icon": "Globe",
+  "version": "1.1.0",
+  "author": "JDF",
+  "entry_point": "main:run",
+  "schedule": {
+    "cron": "0 6 * * 4",
+    "timezone": "Asia/Shanghai"
+  },
+  "timeout_seconds": 7200,
+  "retry": {
+    "max_attempts": 2,
+    "backoff_seconds": 600
+  },
+  "notify_on": [
+    "failure",
+    "timeout",
+    "success"
+  ],
+  "tags": [
+    "亚马逊运营"
+  ],
+  "schedule_enabled": true
+}
