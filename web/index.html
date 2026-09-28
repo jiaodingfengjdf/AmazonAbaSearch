@@ -6,8 +6,8 @@
   <title>ABA 关键词趋势看板</title>
   <link rel="icon" href="data:," />
   <script>try { document.documentElement.dataset.theme = localStorage.getItem('aba-theme') === 'dark' ? 'dark' : 'light'; } catch (_) {}</script>
-  <link rel="stylesheet" href="assets/style.css?v=17" />
-  <link rel="stylesheet" href="assets/agent.css?v=5" />
+  <link rel="stylesheet" href="assets/style.css?v=19" />
+  <link rel="stylesheet" href="assets/agent.css?v=7" />
 </head>
 <body>
   <div class="bg-glow" aria-hidden="true"></div>
@@ -120,29 +120,27 @@
       <section id="agentWelcome" class="agent-welcome">
         <div class="agent-welcome-mark" aria-hidden="true">✦</div>
         <h3>全周期的数据，<br>更完整的选品判断。</h3>
-        <p>从市场发现到上线后监控，结合全部已采集周的关键词与 ASIN 数据开展研究。</p>
-        <div class="agent-prompts">
-          <button data-agent-prompt="基于全部已采集周和全类目，分析需求演变与竞争格局，指出值得继续研究的方向，并标明数据口径。"><span>↗ 全周期市场复盘</span><small>需求规模 · 类目格局 · 变化信号</small></button>
-          <button data-agent-prompt="基于全部已采集周，找出 5 个值得进一步研究的选品关键词。核查完整趋势与 ASIN，给出机会、竞争壁垒、反证和验证步骤。"><span>◎ 发现选品机会</span><small>增长趋势 · 集中度 · 进入门槛</small></button>
-          <button data-agent-prompt="从市场发现、需求验证、差异化、利润与合规、上架投放到上市后监控，给出一套基于当前可用数据的选品研究路径，并指出各阶段缺少哪些外部证据。"><span>⇄ 全流程选品研究</span><small>验证需求 · 核算利润 · 持续监控</small></button>
-          <button data-agent-prompt="基于已采集的完整历史，研究一个值得关注的关键词，从 Rufus / Alexa for Shopping 的公开机制出发，提出适用人群、使用场景与真实产品属性的研究方向，区分事实、推断和待验证假设。"><span>✧ Rufus 场景研究</span><small>搜索意图 · 产品属性 · 真实卖点</small></button>
-        </div>
-        <p class="agent-grounding">每条判断都应有数据依据。也可以先打开关键词详情，再点击「让 AI 分析」。</p>
       </section>
     </div>
     <div class="agent-live-status" id="agentLive" role="status" aria-live="polite"></div>
-    <form id="agentForm" class="agent-composer">
+    <form id="agentForm" class="agent-composer" novalidate>
+      <div id="agentAttachments" class="agent-attachments" aria-label="本对话参与分析的附件"></div>
+      <p id="agentAttachmentHelp" class="agent-attachment-help" hidden>附件会保留在当前对话供追问使用；移除后不再参与分析。</p>
       <label for="agentInput" class="agent-sr-only">输入分析问题</label>
-      <textarea id="agentInput" rows="3" maxlength="6000" placeholder="想研究哪个关键词、ASIN 或选品方向？"></textarea>
-      <div class="agent-composer-actions"><span>Enter 发送 · Shift + Enter 换行</span><button id="agentStop" type="button" class="btn" hidden>停止生成</button><button id="agentSend" type="submit" class="btn agent-send">发送 ↑</button></div>
+      <textarea id="agentInput" rows="3" maxlength="6000" placeholder="输入 / 选择技能，或填写关键词、ASIN、选品方向；支持粘贴图片" aria-describedby="agentComposerHelp" aria-controls="agentSlashSuggestions" aria-expanded="false" aria-autocomplete="list"></textarea>
+      <div id="agentSlashSuggestions" class="agent-slash-suggestions" role="listbox" aria-label="研究技能" hidden></div>
+      <input id="agentImageInput" type="file" class="agent-sr-only" accept=".png,.jpg,.jpeg,.webp,.gif" multiple tabindex="-1" />
+      <input id="agentFileInput" type="file" class="agent-sr-only" accept=".pdf,.xlsx,.csv,.txt,.md,.docx" multiple tabindex="-1" />
+      <div class="agent-composer-actions"><button id="agentImageUpload" type="button" class="btn agent-upload" title="上传图片：PNG、JPG、JPEG、WEBP、GIF；每个文件最大 20 MB">＋ 图片</button><button id="agentUpload" type="button" class="btn agent-upload" title="上传文件：PDF、XLSX、CSV、TXT、MD、DOCX；每个文件最大 20 MB">＋ 文件</button><span id="agentComposerHelp">Enter 发送 · Shift + Enter 换行</span><button id="agentStop" type="button" class="btn" hidden>停止生成</button><button id="agentSend" type="submit" class="btn agent-send">发送 ↑</button></div>
     </form>
+    <div class="agent-skill-area"><span class="agent-skill-label">研究技能</span><div id="agentSkills" class="agent-skills" aria-label="选择技能并补充研究对象"></div><p class="agent-skill-hint">点击填入指令后，补充关键词、ASIN 或选品方向。</p></div>
     <footer class="agent-footer"><span>DeepSeek · 基于已采集数据分析</span><button id="agentExport" type="button">导出对话 ↓</button></footer>
   </aside>
 
   <div class="loading" id="loading"><div class="spinner"></div><span id="loadingText">加载数据…</span></div>
 
   <script src="assets/vendor/echarts.min.js"></script>
-  <script src="assets/app.js?v=23"></script>
-  <script src="assets/agent.js?v=4"></script>
+  <script src="assets/app.js?v=25"></script>
+  <script src="assets/agent.js?v=8"></script>
 </body>
 </html>

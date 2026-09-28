@@ -10,3 +10,4 @@ output/
 __pycache__/
 *.pyc
 agent.local.json
+db/agent_attachments/

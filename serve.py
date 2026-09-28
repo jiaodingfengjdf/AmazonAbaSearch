@@ -12,6 +12,7 @@
 
     GET /api/asin?kw=<关键词>&week=<ara_YYYYMMDD>   # TOP10 ASIN 商品档案
     GET /api/asin/trend?asin=<ASIN>                 # 月均价/月销量/BSR 趋势
+    GET /api/keyword/google-trends?kw=<关键词>     # 谷歌网页搜索近五年周趋势
     GET /api/status                                 # Cookie / 缓存状态自检
 """
 
@@ -29,10 +30,10 @@ import sys
 import threading
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, unquote
 
 import config
-from steps import agent, asin_detail, store
+from steps import agent, agent_attachments, asin_detail, google_trends, store
 
 HOST = "0.0.0.0"
 PORT = 8766
@@ -166,11 +167,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         route = urlparse(self.path).path.rstrip("/")
-        if route not in ("/api/agent/chat", "/api/agent/cancel"):
+        if route not in ("/api/agent/chat", "/api/agent/cancel", "/api/agent/attachments"):
             return self.send_json({"ok": False, "error": "未知接口"}, 404)
         origin = self.headers.get("Origin")
         if (origin and urlparse(origin).netloc.lower() != self.headers.get("Host", "").lower()) or self.headers.get("Sec-Fetch-Site") == "cross-site":
             return self.send_json({"ok": False, "error": "不接受跨站分析请求"}, 403)
+        if route == '/api/agent/attachments':
+            return self.upload_agent_attachment()
         if self.headers.get_content_type() != "application/json":
             return self.send_json({"ok": False, "error": "请求须为 application/json"}, 415)
         try:
@@ -184,11 +187,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 raise ValueError("请求必须是对象")
             if route == "/api/agent/cancel":
                 return self.send_json({"ok": True, "cancelled": agent.cancel(payload.get("request_id"))})
-            run = agent.start(payload)
+            run = agent.start(payload, market_loader=self.agent_market_data)
         except BlockingIOError as exc:
             return self.send_json({"ok": False, "error": str(exc)}, 429)
-        except (ValueError, UnicodeError, TimeoutError):
-            return self.send_json({"ok": False, "error": "请求或 Agent 配置无效，请检查问题长度、数据期与本地配置"}, 400)
+        except ValueError as exc:
+            return self.send_json({"ok": False, "error": str(exc)[:240]}, 400)
+        except (UnicodeError, TimeoutError):
+            return self.send_json({"ok": False, "error": "请求格式无效或读取超时"}, 400)
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -209,6 +214,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionError, OSError):
             agent.cancel(run.id)
 
+    def upload_agent_attachment(self):
+        if self.headers.get_content_type() != 'application/octet-stream':
+            return self.send_json({'ok': False, 'error': '附件须以二进制文件上传'}, 415)
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= agent_attachments.MAX_FILE_BYTES:
+                return self.send_json({'ok': False, 'error': '文件为空或超过 20 MB'}, 413)
+            name = unquote(self.headers.get('X-File-Name', ''), errors='strict')
+            self.connection.settimeout(60)
+            raw = self.rfile.read(length)
+            self.connection.settimeout(None)
+            if len(raw) != length:
+                raise ValueError('文件上传不完整，请重新上传')
+            attachment = agent_attachments.AttachmentStore().ingest(name, raw)
+            return self.send_json({'ok': True, 'attachment': attachment})
+        except BlockingIOError as exc:
+            return self.send_json({'ok': False, 'error': str(exc)}, 429)
+        except (ValueError, UnicodeError) as exc:
+            return self.send_json({'ok': False, 'error': str(exc)[:240]}, 400)
+        except (TimeoutError, OSError):
+            return self.send_json({'ok': False, 'error': '附件读取或保存失败，请重试'}, 400)
+
     # ------------------------------ 详情数据接口 ------------------------------
 
     def handle_api(self, parsed) -> None:
@@ -220,6 +247,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 payload = self.api_keyword_asins(query)
             elif route == "/api/asin/trend":
                 payload = self.api_asin_trend(query)
+            elif route == "/api/keyword/google-trends":
+                payload = self.api_google_trends(query)
             elif route == "/api/status":
                 payload = self.api_status()
             elif route == "/api/agent/status":
@@ -241,7 +270,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         ).fetchone()
         return (row and row["d"]) or ""
 
-    def api_keyword_asins(self, query: dict) -> dict:
+    def api_keyword_asins(self, query: dict, request_timeout=None) -> dict:
         keyword = self.first(query, "kw").strip()
         if not keyword:
             return {"ok": False, "error": "缺少参数 kw（关键词）"}
@@ -261,7 +290,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if live:
                     throttle_fetch()
                 payload = asin_detail.keyword_payload(
-                    conn, keyword=keyword, market=config.MARKET, table_date=week, live=live)
+                    conn, keyword=keyword, market=config.MARKET, table_date=week, live=live, request_timeout=request_timeout)
                 if blocked and not live and payload.get("detailMissing"):
                     payload.update({"errorCode": "ERR_USER_NOT_LOGIN",
                                     "error": "自动恢复登录态暂未成功，稍后重试"})
@@ -270,14 +299,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if recover_session():
                         throttle_fetch()
                         payload = asin_detail.keyword_payload(
-                            conn, keyword=keyword, market=config.MARKET, table_date=week, live=True)
+                            conn, keyword=keyword, market=config.MARKET, table_date=week, live=True, request_timeout=request_timeout)
                     if payload.get("errorCode") == "ERR_USER_NOT_LOGIN":
                         mark_session_blocked("登录态失效")
             return payload
         finally:
             conn.close()
 
-    def api_asin_trend(self, query: dict) -> dict:
+    def api_asin_trend(self, query: dict, request_timeout=None) -> dict:
         asin = self.first(query, "asin").strip().upper()
         if not asin:
             return {"ok": False, "error": "缺少参数 asin"}
@@ -292,7 +321,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if live:
                     throttle_fetch()
                 payload = asin_detail.trend_payload(
-                    conn, asin=asin, market=config.MARKET, live=live)
+                    conn, asin=asin, market=config.MARKET, live=live, request_timeout=request_timeout)
                 if blocked and not live and not asin_detail.has_usable_trend(payload):
                     payload.update({"errorCode": "ERR_USER_NOT_LOGIN",
                                     "error": "自动恢复登录态暂未成功，稍后重试"})
@@ -301,13 +330,41 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     if recover_session():
                         throttle_fetch()
                         payload = asin_detail.trend_payload(
-                            conn, asin=asin, market=config.MARKET, live=True)
+                            conn, asin=asin, market=config.MARKET, live=True, request_timeout=request_timeout)
                     if payload.get("errorCode") == "ERR_USER_NOT_LOGIN":
                         mark_session_blocked("登录态失效")
             payload["asin"] = asin
             return payload
         finally:
             conn.close()
+
+    def api_google_trends(self, query: dict) -> dict:
+        keyword = self.first(query, "kw").strip()
+        if not keyword or len(keyword) > 500:
+            return {"ok": False, "error": "kw 须为 1–500 字符的关键词"}
+        with _lock_for(f"google::{config.MARKET}::{keyword}"):
+            blocked = session_blocked()
+            live = not blocked or recover_session()
+            if live:
+                throttle_fetch()
+            result = google_trends.load(keyword=keyword, market=config.MARKET, live=live)
+            if result.get("errorCode") == "ERR_USER_NOT_LOGIN":
+                mark_session_blocked("登录态失效")
+                if recover_session():
+                    throttle_fetch()
+                    result = google_trends.load(keyword=keyword, market=config.MARKET)
+            return result
+
+    def agent_market_data(self, name: str, arguments: dict) -> dict:
+        """Agent 与页面共用详情接口的缓存、节流和登录态恢复。"""
+        live = '1' if arguments.get('live', True) else '0'
+        if name == 'keyword_asins':
+            return self.api_keyword_asins({'kw': [arguments['keyword']], 'week': [arguments['week']], 'live': [live]}, request_timeout=20)
+        if name == 'asin_trend':
+            return self.api_asin_trend({'asin': [arguments['asin']], 'live': [live]}, request_timeout=20)
+        if name == 'google_trends':
+            return self.api_google_trends({'kw': [arguments['keyword']]})
+        raise ValueError('未知市场数据接口')
 
     def api_status(self) -> dict:
         session_blocked()          # 顺便刷新一次冷却状态（Cookie 被刷新过会自动解除）

@@ -248,7 +248,7 @@ def fetch_asin_trend(client: AbaClient, asin: str, market: Optional[str] = None)
             "https://www.sellersprite.com/v2/competitor-lookup/chart-monthly.json",
             data={"marketId": market_id, "asin": asin},
             headers={"content-type": "application/x-www-form-urlencoded;charset=UTF-8"},
-            timeout=60,
+            timeout=min(60, client.timeout),
         )
         response.raise_for_status()
         payload = response.json()
@@ -307,7 +307,8 @@ def _detail_rows(conn: sqlite3.Connection, keyword: str, market: str,
 
 
 def keyword_payload(conn: sqlite3.Connection, *, keyword: str, market: str, table_date: str,
-                    live: bool = True, client: Optional[AbaClient] = None) -> Dict[str, Any]:
+                    live: bool = True, client: Optional[AbaClient] = None,
+                    request_timeout: Optional[float] = None) -> Dict[str, Any]:
     """抽屉用的关键词 ASIN 明细：优先读缓存，缺失的实时补抓。"""
     ordered, top3_map = _asins_of_keyword(conn, keyword, market, table_date)
     if not ordered:
@@ -329,6 +330,9 @@ def keyword_payload(conn: sqlite3.Connection, *, keyword: str, market: str, tabl
         try:
             aba = client or make_client()
             own_client = client is None
+            if own_client and request_timeout is not None:
+                aba.timeout = request_timeout
+                aba.retries = 0
             fetch_keyword_details(conn, aba, keyword=keyword, market=market,
                                   table_date=table_date, asins=missing)
             cached = _detail_rows(conn, keyword, market, table_date, asins)
@@ -366,6 +370,7 @@ def keyword_payload(conn: sqlite3.Connection, *, keyword: str, market: str, tabl
             merged["clickRate"] = t3.get("clickRate")
             merged["conversionRate"] = t3.get("conversionRate")
         merged["hasDetail"] = bool(detail)
+        merged["fetchedAt"] = detail.get("_fetchedAt")
         out_asins.append(merged)
 
     aba_top3 = [
@@ -435,7 +440,8 @@ def has_usable_trend(payload: Dict[str, Any]) -> bool:
 
 def trend_payload(conn: sqlite3.Connection, *, asin: str, market: str, live: bool = True,
                   max_age_hours: Optional[float] = None,
-                  client: Optional[AbaClient] = None) -> Dict[str, Any]:
+                  client: Optional[AbaClient] = None,
+                  request_timeout: Optional[float] = None) -> Dict[str, Any]:
     """ASIN 价格/销量/BSR 趋势：缓存新鲜就直接给，否则实时抓。"""
     max_age = float(max_age_hours if max_age_hours is not None
                     else getattr(config, "ASIN_TREND_MAX_AGE_HOURS", 168))
@@ -487,6 +493,9 @@ def trend_payload(conn: sqlite3.Connection, *, asin: str, market: str, live: boo
     try:
         aba = client or make_client()
         own_client = client is None
+        if own_client and request_timeout is not None:
+            aba.timeout = request_timeout
+            aba.retries = 0
         payload = fetch_asin_trend(aba, asin, market)
         conn.execute(
             "INSERT INTO asin_trend(asin, market, data, fetched_at) VALUES (?,?,?,?) "

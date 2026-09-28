@@ -46,6 +46,53 @@ class AgentDataTest(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             self.data.conn.execute('DELETE FROM keyword')
 
+    def test_agent_google_trends_reuses_dashboard_cache_and_full_series(self):
+        points = [{'date': f'2025-01-{i:02}', 'time': 1735689600000 + (i-1)*86400000,
+                   'value': 0 if i == 1 else (None if i == 2 else i), 'label': str(i)}
+                  for i in range(1, 29)]
+        c = sqlite3.connect(self.path)
+        from steps import google_trends
+        with patch.object(google_trends, 'fetch', return_value={'timeLineData': []}):
+            google_trends.payload(c, keyword='serum', market='COM')
+        cached = {'ok': True, 'keyword': 'serum', 'station': 'COM', 'fetchedAt': __import__('time').time(), 'trend': points}
+        c.execute('UPDATE google_trend SET payload=?', (json.dumps(cached),))
+        c.commit(); c.close()
+        with patch.object(google_trends, 'fetch', side_effect=AssertionError('should use cache')):
+            result = self.data.execute('google_trends', {'keywords': ['serum']})
+        trend = result['keywords'][0]
+        self.assertEqual(trend['source'], 'cache')
+        self.assertEqual(len(trend['trend']), 28)
+        self.assertEqual(trend['trend'][0]['value'], 0)
+        self.assertIsNone(trend['trend'][1]['value'])
+        self.assertIn('fetchedAt', trend)
+        self.assertIn('0–100', result['metric_note'])
+        self.assertIn('google_trends', [t['name'] for t in agent.TOOLS])
+
+    def test_agent_google_trends_can_fetch_uncached_keyword_and_report_failure(self):
+        from steps import google_trends
+        raw = {'timeLineData': [{'time': 1735689600000, 'value': 100, 'hasData': True}]}
+        with patch.object(google_trends, 'fetch', return_value=raw) as fetch:
+            result = self.data.execute('google_trends', {'keywords': ['new keyword']})
+        self.assertTrue(result['keywords'][0]['ok'])
+        fetch.assert_called_once_with('new keyword', 'COM')
+        with patch.object(google_trends, 'fetch', side_effect=TimeoutError()):
+            result = self.data.execute('google_trends', {'keywords': ['missing keyword']})
+        self.assertFalse(result['keywords'][0]['ok'])
+        self.assertEqual(result['keywords'][0]['trend'], [])
+        with self.assertRaises(sqlite3.OperationalError):
+            self.data.conn.execute('DELETE FROM keyword')
+
+    def test_agent_google_trends_validates_all_arguments_before_fetch(self):
+        from steps import google_trends
+        with patch.object(google_trends, 'fetch') as fetch:
+            for args in ({'keywords': []}, {'keywords': ['a'] * 4},
+                         {'keywords': ['a', '']}, {'keywords': ['a'], 'years': True},
+                         {'keywords': ['a'], 'years': 2}, {'keywords': 'serum'},
+                         {'keywords': ['a'], 'url': 'https://example.com'}):
+                with self.assertRaises((ValueError, TypeError)):
+                    self.data.execute('google_trends', args)
+            fetch.assert_not_called()
+
     def test_keyword_parameter_cannot_change_sql(self):
         r = self.data.keyword_analysis(keywords=["'; DROP TABLE keyword;--"])
         self.assertEqual(r['keywords'][0]['snapshots'][0]['searches'],6000)

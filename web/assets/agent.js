@@ -8,7 +8,117 @@
   let records = [], active = null, returnFocus = null, configured = false;
   let conversations = [], activeConversationId = '', context = {}, statusCheckedAt = 0;
   let statusPromise = null, pendingKeyword = '', keywordStarting = false;
+  let attachments = [], uploads = 0, skills = [], suggestions = [], suggestionIndex = 0;
+  let attachmentPolicy = { formats: ['png','jpg','jpeg','webp','gif','pdf','xlsx','csv','txt','md','docx'], max_file_bytes: 20971520, max_files: 10 };
   const welcome = el('agentWelcome');
+
+  function attachmentMetadata(item) {
+    return { id: item.id, name: item.name, size: item.size, kind: item.kind, chunks: item.chunks || 0,
+      warnings: Array.isArray(item.warnings) ? item.warnings.filter(w => typeof w === 'string') : [] };
+  }
+  function savedAttachments(items) {
+    return (Array.isArray(items) ? items : []).filter(a => a && /^[a-f0-9]{32}$/i.test(a.id) && typeof a.name === 'string')
+      .slice(0, 10).map(a => ({ ...attachmentMetadata(a), state: 'ready' }));
+  }
+  function renderAttachments() {
+    el('agentAttachments').replaceChildren(...attachments.map(item => {
+      const chip = node('div', `agent-attachment ${item.state}`);
+      if (item.previewUrl) {
+        const img = node('img', 'agent-attachment-thumb'); img.src = item.previewUrl; img.alt = ''; chip.append(img);
+      } else chip.append(node('span', 'agent-attachment-icon', item.kind === 'image' ? '▧' : item.kind === 'table' ? '▦' : '▤'));
+      const info = node('div', 'agent-attachment-info');
+      info.append(node('span', 'agent-attachment-name', item.name));
+      const status = item.state === 'uploading' ? '正在上传…' : item.state === 'error' ? item.error : `${item.kind === 'image' ? '图片' : item.kind === 'table' ? '表格' : '文档'} · ${Math.max(1, Math.round(item.size / 1024))} KB${item.warnings?.length ? ' · 有提示' : ''}`;
+      const detail = node('small', '', status); info.append(detail); chip.append(info);
+      chip.title = [item.name, status, ...(item.warnings || [])].join('\n');
+      if (item.state === 'error' && item.file) {
+        const retry = node('button', 'agent-attachment-retry', '重试'); retry.type = 'button'; retry.disabled = !!active || uploads > 0;
+        retry.onclick = () => uploadAttachment(item); chip.append(retry);
+      }
+      const remove = node('button', 'agent-attachment-remove', '×'); remove.type = 'button'; remove.setAttribute('aria-label', `移除附件 ${item.name}`);
+      remove.disabled = !!active || uploads > 0; remove.onclick = () => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        attachments = attachments.filter(a => a !== item); renderAttachments(); updateControls(); persist();
+      }; chip.append(remove); return chip;
+    }));
+    el('agentAttachmentHelp').hidden = !attachments.length;
+  }
+  async function uploadAttachment(item) {
+    if (active) return;
+    const conversationId = activeConversationId;
+    uploads++; item.state = 'uploading'; item.error = ''; renderAttachments(); updateControls();
+    try {
+      const response = await fetch('/api/agent/attachments', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(item.name) }, body: item.file });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) throw new Error(result.error || `上传失败（${response.status}），请重试或移除附件`);
+      const valid = savedAttachments([result.attachment]);
+      if (!valid.length) throw new Error('上传响应无效，请重试');
+      Object.assign(item, valid[0]); item.file = null;
+      el('agentLive').textContent = `${item.name} 已上传${item.warnings?.length ? '，查看附件提示后发送' : '，可以发送或继续添加附件'}`;
+    } catch (err) { item.state = 'error'; item.error = err.message; el('agentLive').textContent = `${item.name}：${err.message}`; }
+    finally {
+      uploads--;
+      if (activeConversationId === conversationId) { renderAttachments(); updateControls(); persist(); }
+      if (!uploads && pendingKeyword) startPendingKeyword();
+    }
+  }
+  async function addFiles(files) {
+    if (active || uploads) { el('agentLive').textContent = '请等当前上传或分析完成后添加附件。'; return; }
+    const incoming = Array.from(files), remaining = attachmentPolicy.max_files - attachments.length;
+    if (incoming.length > remaining) el('agentLive').textContent = `每个对话最多 ${attachmentPolicy.max_files} 个附件，请移除附件后继续添加。`;
+    const batch = incoming.slice(0, Math.max(0, remaining)).map(file => {
+      const extension = file.name.split('.').pop().toLowerCase();
+      const error = !attachmentPolicy.formats.includes(extension) ? '不支持此格式，请改用图片、PDF、XLSX、CSV、TXT、MD 或 DOCX' : file.size > attachmentPolicy.max_file_bytes ? '文件超过 20 MB，请压缩或拆分后重新添加' : file.size === 0 ? '文件为空，请重新选择' : '';
+      const kind = ['png','jpg','jpeg','webp','gif'].includes(extension) ? 'image' : ['xlsx','csv'].includes(extension) ? 'table' : 'document';
+      return { name: file.name, size: file.size, kind, file: error ? null : file, state: error ? 'error' : 'queued', error,
+        previewUrl: kind === 'image' && !error ? URL.createObjectURL(file) : null };
+    });
+    // Hold a batch lock between files; the service limits concurrent parsers.
+    uploads++;
+    attachments.push(...batch); renderAttachments(); updateControls();
+    try { for (const item of batch.filter(a => a.file)) await uploadAttachment(item); }
+    finally {
+      uploads--; renderAttachments(); updateControls(); persist();
+      if (!uploads && pendingKeyword) startPendingKeyword();
+    }
+  }
+  function renderSkills() {
+    el('agentSkills').replaceChildren(...skills.map(skill => {
+      const button = node('button', 'agent-skill', skill.title); button.type = 'button';
+      button.title = `/${skill.id} · ${skill.description}${skill.hint ? '\n' + skill.hint : ''}`;
+      button.onclick = () => selectSkill(skill); return button;
+    }));
+    updateSuggestions();
+  }
+  function selectSkill(skill) {
+    const command = `/${skill.id} `;
+    input.value = /^\/[^\s]*\s?/.test(input.value) ? input.value.replace(/^\/[^\s]*\s?/, command) : command + input.value;
+    input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+    hideSuggestions(); updateControls();
+  }
+  function hideSuggestions() {
+    suggestions = []; el('agentSlashSuggestions').hidden = true;
+    input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant');
+  }
+  function updateSuggestions() {
+    const match = input.value.match(/^\/([^\s]*)$/);
+    suggestions = match && !active ? skills.filter(s => s.id.includes(match[1].toLowerCase()) || s.title.includes(match[1])) : [];
+    suggestionIndex = 0; paintSuggestions();
+  }
+  function paintSuggestions() {
+    const list = el('agentSlashSuggestions'); list.hidden = !suggestions.length;
+    input.setAttribute('aria-expanded', String(!!suggestions.length));
+    list.replaceChildren(...suggestions.map((skill, index) => {
+      const option = node('button', 'agent-slash-option'); option.type = 'button'; option.id = `agentSkillOption${index}`;
+      option.setAttribute('role', 'option'); option.setAttribute('aria-selected', String(index === suggestionIndex)); option.tabIndex = -1;
+      option.append(node('strong', '', `/${skill.id} · ${skill.title}`), node('small', '', skill.hint || skill.description));
+      option.onclick = () => selectSkill(skill); return option;
+    }));
+    if (suggestions.length) {
+      input.setAttribute('aria-activedescendant', `agentSkillOption${suggestionIndex}`);
+      list.children[suggestionIndex]?.scrollIntoView?.({ block: 'nearest' });
+    } else input.removeAttribute('aria-activedescendant');
+  }
 
   function node(tag, className, text) {
     const n = document.createElement(tag);
@@ -91,8 +201,18 @@
         const res = await fetch('/api/agent/status');
         if (!res.ok) throw new Error('service');
         const data = await res.json();
-        configured = data.ok && data.configured && data.data_available;
-        if (!configured) el('agentLive').textContent = !data.configured ? '请在服务端配置 DeepSeek 密钥后重试。' : '请先完成一次 ABA 数据采集。';
+        skills = (Array.isArray(data.skills) ? data.skills : []).filter(s => s && /^[a-z][a-z0-9_-]*$/.test(s.id) && typeof s.title === 'string')
+          .map(s => ({ ...s, description: typeof s.description === 'string' ? s.description : '', hint: typeof s.hint === 'string' ? s.hint : '' }));
+        if (data.attachments) {
+          attachmentPolicy = { ...attachmentPolicy, ...data.attachments };
+          const imageFormats = ['png','jpg','jpeg','webp','gif'];
+          el('agentImageInput').accept = attachmentPolicy.formats.filter(f => imageFormats.includes(f)).map(f => `.${f}`).join(',');
+          el('agentFileInput').accept = attachmentPolicy.formats.filter(f => !imageFormats.includes(f)).map(f => `.${f}`).join(',');
+        }
+        renderSkills();
+        configured = data.ok && data.configured;
+        if (!configured) el('agentLive').textContent = '请在服务端配置 DeepSeek 密钥后重试。';
+        else if (!data.data_available) el('agentLive').textContent = '暂无 ABA 采集数据，可以先上传附件进行分析。';
       } catch (_) {
         configured = false;
         el('agentLive').textContent = '分析服务未连接，请确认看板服务已更新并启动。';
@@ -104,12 +224,20 @@
   }
   function updateControls() {
     const ready = configured;
-    el('agentSend').disabled = !!active || !ready || !input.value.trim();
+    const uploading = uploads > 0;
+    el('agentSend').disabled = !!active || uploading || !ready || attachments.some(a => a.state !== 'ready') || (!input.value.trim() && !attachments.some(a => a.state === 'ready'));
     el('agentSend').hidden = !!active;
     el('agentStop').hidden = !active;
-    el('agentNew').disabled = !!active;
-    el('agentClear').disabled = !!active || !records.length;
-    el('agentConversations').disabled = !!active;
+    const emptyCurrent = !records.length && !attachments.length;
+    el('agentNew').disabled = !!active || uploading || emptyCurrent;
+    el('agentNew').title = emptyCurrent ? '当前已是空白对话，可以直接输入问题' : '新建对话';
+    el('agentClear').disabled = !!active || uploading || (!records.length && !attachments.length);
+    el('agentConversations').disabled = !!active || uploading;
+    el('agentUpload').disabled = !!active || uploading || attachments.length >= attachmentPolicy.max_files;
+    el('agentImageUpload').disabled = el('agentUpload').disabled;
+    el('agentFileInput').disabled = !!active || uploading;
+    el('agentImageInput').disabled = !!active || uploading;
+    document.querySelectorAll('.agent-skill').forEach(b => { b.disabled = !!active; });
     document.querySelectorAll('[data-agent-prompt]').forEach((b) => { b.disabled = !!active || !ready; });
   }
   function syncLayout() {
@@ -149,12 +277,25 @@
     else el('agentLauncher').focus();
     panel.inert = true;
   }
+  function isBlankConversation(conversation) {
+    return (!conversation.title || conversation.title === '新对话') && !conversation.records.length && !conversation.attachments?.length;
+  }
+  function pruneBlankConversations() {
+    const blanks = conversations.filter(isBlankConversation);
+    if (blanks.length < 2) return false;
+    const keep = blanks.find(c => c.id === activeConversationId) || blanks.at(-1);
+    conversations = conversations.filter(c => !isBlankConversation(c) || c === keep);
+    return true;
+  }
   function persist() {
     try {
       const current = conversations.find(c => c.id === activeConversationId);
+      if (current) current.attachments = attachments.filter(a => a.state === 'ready').map(attachmentMetadata);
       if (current) current.records = records.slice(-20).map((r) => ({ role: r.role, content: r.content.slice(0,24000), context: r.context,
+        attachments: (r.attachments || []).map(attachmentMetadata),
         status: r.status === 'pending' ? 'interrupted' : r.status, note: r.note,
         sources: r.sources.map(({ id, label, week, url, summary, scope, arguments: args }) => ({ id, label, week, url, summary, scope, arguments: args })) }));
+      if (pruneBlankConversations()) updateConversationSelect();
       sessionStorage.setItem(storageKey, JSON.stringify({ activeConversationId, conversations: conversations.slice(-20) }));
     } catch (_) { /* Storage may be full or disabled; the current conversation remains available. */ }
   }
@@ -168,12 +309,15 @@
     select.value = activeConversationId;
   }
   function showConversation() {
+    attachments.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
     const current = conversations.find(c => c.id === activeConversationId);
     records = (current?.records || []).map(r => ({ ...r, sources: [...r.sources] }));
+    attachments = savedAttachments(current?.attachments);
     feed.querySelectorAll('.agent-message').forEach(n => n.remove());
     welcome.hidden = false;
     records.forEach(r => { append(r); renderSources(r); });
     input.value = '';
+    hideSuggestions(); renderAttachments();
     el('agentLive').textContent = '';
     updateConversationSelect(); updateControls();
   }
@@ -186,6 +330,11 @@
     const sources = node('details', 'agent-sources'); sources.hidden = true;
     const note = node('div', 'agent-message-note');
     article.append(meta, body, sources, note);
+    if (record.attachments?.length) {
+      const files = node('div', 'agent-message-attachments');
+      record.attachments.forEach(a => files.append(node('span', '', `${a.kind === 'image' ? '▧' : a.kind === 'table' ? '▦' : '▤'} ${a.name}`)));
+      article.append(files);
+    }
     if (record.role === 'assistant') {
       const copy = node('button', 'agent-copy', '复制回答'); copy.type = 'button';
       copy.onclick = async () => {
@@ -223,10 +372,13 @@
           catch (_) { location.href = url.href; }
         };
       }
-      row.append(a, node('span', '', source.week ? source.week.replace('ara_', '') : '全周期'));
+      const period = source.scope?.period === 'live_review_sample' ? '评论样本'
+        : source.scope?.period === 'user_uploaded_files' ? '上传附件'
+        : source.week ? source.week.replace('ara_', '') : '全周期';
+      row.append(a, node('span', '', period));
       if (source.summary) row.append(node('div', '', source.summary));
       if (source.scope?.department) row.append(node('div', '', `类目：${source.scope.department}`));
-      const focus = source.arguments?.keywords || source.arguments?.asins;
+      const focus = source.arguments?.keywords || source.arguments?.asins || (source.arguments?.asin ? [source.arguments.asin] : null);
       if (focus) row.append(node('div', '', focus.join(' · ')));
       details.append(row);
     });
@@ -249,21 +401,25 @@
   }
   function createConversation(title = '新对话') {
     persist();
-    const conversation = { id: requestId(), title, records: [] };
-    conversations.push(conversation);
+    let conversation = conversations.find(c => c.id === activeConversationId && isBlankConversation(c))
+      || conversations.slice().reverse().find(isBlankConversation);
+    if (!conversation) {
+      conversation = { id: requestId(), title, records: [], attachments: [] };
+      conversations.push(conversation);
+    } else conversation.title = title;
     conversations = conversations.slice(-20);
     activeConversationId = conversation.id;
     showConversation(); persist();
   }
   async function startPendingKeyword() {
-    if (keywordStarting || !pendingKeyword || active) return;
+    if (keywordStarting || !pendingKeyword || active || uploads) return;
     keywordStarting = true;
     try {
       if (!configured || Date.now() - statusCheckedAt > 15000) await checkStatus();
-      if (!pendingKeyword || active) return;
+      if (!pendingKeyword || active || uploads) return;
       const keyword = pendingKeyword;
       pendingKeyword = '';
-      if (records.length || input.value.trim()) createConversation(`${keyword.slice(0, 20)} · 关键词分析`);
+      if (records.length || input.value.trim() || attachments.length) createConversation(`${keyword.slice(0, 20)} · 关键词分析`);
       else {
         const current = conversations.find(c => c.id === activeConversationId);
         if (current) { current.title = `${keyword.slice(0, 20)} · 关键词分析`; updateConversationSelect(); persist(); }
@@ -275,17 +431,19 @@
     } finally { keywordStarting = false; }
   }
   async function send() {
-    const question = input.value.trim();
-    if (active || !question || !configured) return;
+    const selected = attachments.filter(a => a.state === 'ready').map(attachmentMetadata);
+    const question = input.value.trim() || (selected.length ? '分析上传的附件' : '');
+    if (active || uploads || attachments.some(a => a.state !== 'ready') || !question || !configured) return;
+    hideSuggestions();
     refreshContext();
     const snapshot = structuredClone(context), prior = history();
-    const user = { role: 'user', content: question, context: snapshot, sources: [], status: 'completed' };
+    const user = { role: 'user', content: question, context: snapshot, attachments: selected, sources: [], status: 'completed' };
     const reply = { role: 'assistant', content: '', context: snapshot, sources: [], status: 'pending' };
     records.push(user, reply); append(user); append(reply);
     const current = conversations.find(c => c.id === activeConversationId);
     if (current && current.title === '新对话') { current.title = question.slice(0, 28); updateConversationSelect(); }
     const run = { id: requestId(), controller: new AbortController(), stopped: false };
-    active = run; input.value = ''; updateControls();
+    active = run; input.value = ''; renderAttachments(); updateControls();
     el('agentLive').classList.add('busy'); el('agentLive').textContent = '正在连接研究员…';
     let timer = null, completed = false;
     const paint = () => {
@@ -310,7 +468,7 @@
       if (event.type === 'error') throw new Error(event.message);
     };
     try {
-      const payload = { request_id: run.id, message: question, history: prior, context: snapshot };
+      const payload = { request_id: run.id, message: question, history: prior, context: snapshot, attachment_ids: selected.map(a => a.id) };
       let encoded = JSON.stringify(payload);
       while (payload.history.length && new TextEncoder().encode(encoded).length > 120 * 1024) {
         payload.history.splice(0,2); encoded = JSON.stringify(payload);
@@ -342,7 +500,7 @@
       if (!run.stopped && !input.value) input.value = question;
     } finally {
       clearTimeout(timer); paint(); active = null;
-      el('agentLive').classList.remove('busy'); updateControls(); persist();
+      el('agentLive').classList.remove('busy'); renderAttachments(); updateControls(); persist();
       if (pendingKeyword) startPendingKeyword();
     }
   }
@@ -359,23 +517,40 @@
   el('agentBackdrop').onclick = close;
   el('agentStop').onclick = stop;
   el('agentForm').onsubmit = (event) => { event.preventDefault(); send(); };
-  input.oninput = updateControls;
+  input.oninput = () => { updateSuggestions(); updateControls(); };
+  input.addEventListener('paste', (event) => {
+    const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter(Boolean);
+    if (files.length) { event.preventDefault(); addFiles(files); }
+  });
+  el('agentUpload').onclick = () => el('agentFileInput').click();
+  el('agentImageUpload').onclick = () => el('agentImageInput').click();
+  el('agentFileInput').onchange = (event) => { addFiles(event.target.files); event.target.value = ''; };
+  el('agentImageInput').onchange = (event) => { addFiles(event.target.files); event.target.value = ''; };
   input.onkeydown = (event) => {
+    if (event.isComposing) return;
+    if (suggestions.length) {
+      if (['ArrowDown', 'ArrowUp'].includes(event.key)) {
+        event.preventDefault(); suggestionIndex = (suggestionIndex + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length; paintSuggestions(); return;
+      }
+      if (['Enter', 'Tab'].includes(event.key) && !event.shiftKey) { event.preventDefault(); selectSkill(suggestions[suggestionIndex]); return; }
+      if (event.key === 'Escape') { event.preventDefault(); hideSuggestions(); return; }
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(); }
   };
   el('agentNew').onclick = () => {
-    if (active) return;
+    if (active || uploads) return;
+    if (!records.length && !attachments.length) { input.focus(); return; }
     pendingKeyword = '';
     createConversation(); input.focus();
   };
   el('agentClear').onclick = () => {
-    if (active || !records.length || !window.confirm('清除当前对话的所有消息？')) return;
+    if (active || uploads || (!records.length && !attachments.length) || !window.confirm('清除当前对话的所有消息和附件？')) return;
     const current = conversations.find(c => c.id === activeConversationId);
-    if (current) { current.records = []; current.title = '新对话'; }
+    if (current) { current.records = []; current.attachments = []; current.title = '新对话'; }
     showConversation(); persist(); input.focus();
   };
   el('agentConversations').onchange = (event) => {
-    if (active) return;
+    if (active || uploads) return;
     persist(); activeConversationId = event.target.value;
     showConversation(); persist(); input.focus();
   };
@@ -391,9 +566,9 @@
   };
   document.addEventListener('keydown', (event) => {
     if (!panel.classList.contains('open')) return;
-    if (event.key === 'Escape') { event.stopImmediatePropagation(); close(); }
-    if (event.key === 'Tab' && mobile.matches) {
-      const focusable = [...panel.querySelectorAll('button:not([disabled]),a[href],textarea,summary')].filter(n => n.getClientRects().length);
+    if (event.key === 'Escape') { event.stopImmediatePropagation(); if (suggestions.length) hideSuggestions(); else close(); }
+    if (event.key === 'Tab' && mobile.matches && !(document.activeElement === input && suggestions.length && !event.shiftKey)) {
+      const focusable = [...panel.querySelectorAll('button:not([disabled]):not([tabindex="-1"]),a[href],textarea,select:not([disabled]),summary')].filter(n => n.getClientRects().length);
       const first = focusable[0], last = focusable[focusable.length-1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
@@ -408,7 +583,9 @@
     if (saved && Array.isArray(saved.conversations)) {
       conversations = saved.conversations.filter(c => c && typeof c.id === 'string' && Array.isArray(c.records))
         .slice(-20).map(c => ({ id: c.id, title: typeof c.title === 'string' ? c.title.slice(0, 28) : '新对话',
-          records: c.records.filter(r => ['user','assistant'].includes(r.role) && typeof r.content === 'string' && r.context && Array.isArray(r.sources)).slice(-20) }));
+          attachments: savedAttachments(c.attachments).map(attachmentMetadata),
+          records: c.records.filter(r => ['user','assistant'].includes(r.role) && typeof r.content === 'string' && r.context && Array.isArray(r.sources)).slice(-20)
+            .map(r => ({ ...r, attachments: savedAttachments(r.attachments).map(attachmentMetadata) })) }));
       activeConversationId = conversations.some(c => c.id === saved.activeConversationId) ? saved.activeConversationId : conversations.at(-1)?.id;
     } else {
       const previous = JSON.parse(sessionStorage.getItem('aba-research-chat-v2') || '[]');
@@ -417,6 +594,7 @@
       activeConversationId = conversations[0]?.id || '';
     }
   } catch (_) { conversations = []; }
+  pruneBlankConversations();
   if (!conversations.length) {
     const initial = { id: requestId(), title: '新对话', records: [] };
     conversations = [initial]; activeConversationId = initial.id;

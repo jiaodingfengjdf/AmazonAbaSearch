@@ -1,5 +1,36 @@
 # ABA 关键词趋势看板（全类目周更）
 
+关键词详情抽屉在「历史趋势（搜索量 / ABA 排名）」下方统一展示一次 Google 网页搜索近五年周趋势，打开抽屉时自动加载，可展开或收起。各 ASIN 卡片只保留价格趋势。支持近1年、近3年、全部和图表缩放；范围切换保留同一五年数据的 0–100 相对搜索指数口径。没有 ASIN 快照的关键词也独立展示谷歌趋势。
+
+数据按需通过 `GET /api/keyword/google-trends?kw=<关键词>` 获取，复用现有卖家精灵 Cookie，调用 `/v2/keyword/google-trends.json`（`station` 为配置站点，`gprop` 为空，`intervalYear=5&gv=false&monthly=false`）。SQLite `google_trend` 表按站点与关键词缓存 24 小时，跨商品和数据期复用；请求失败可展示带过期提示的缓存，没有缓存时提供重试。选择历史 ABA 数据期时，谷歌趋势仍是截至当前时间的最新五年趋势。
+
+AI 研究员通过 `google_trends` 工具读取相同缓存，未缓存时按需获取；每次支持1–3个关键词及1/3/5年范围，返回完整周曲线、站点、更新时间和过期/错误状态，并生成可引用的 `[D编号]` 数据证据。ABA 分析数据库连接仍为只读，趋势服务独立维护供应商数据缓存；该工具不提供通用网页浏览或政策检索能力。
+
+## AI 研究员的数据检索范围
+
+Agent 默认检索数据库中的所有已采集历史周和所有类目，不受页面周、类目、筛选器、搜索框及是否点开详情影响。每轮直接查询现有数据，周更后自动可用。每次按问题读取相关记录，并以 `[D编号]` 引用返回的真实证据；分页大小不代表全库只有这些记录。
+
+| 数据范围 | Agent 工具 |
+|---|---|
+| 数据类型、记录数、完整字段、历史周与知识来源 | `data_catalog` |
+| 大盘逐周统计与采集口径 | `data_overview` |
+| 各类目逐周需求、购买估计、集中度与排名增长 | `category_analysis` |
+| 全库关键词发现与分页筛选 | `search_keywords` |
+| 完整关键词字段、竞价类型、广告数、TOP3份额/品牌、自然位ASIN、每周类目归属 | `keyword_analysis`、`keyword_snapshots` |
+| 供应商完整搜索量与ABA排名历史序列 | `keyword_history` |
+| 历史自然位/TOP3商品及商品标题、品牌、卖家检索 | `search_asins` |
+| 完整已存商品档案、图片、上架时间、评分/评论数、FBA、毛利率、尺寸、变体、LQS及关联缓存历史 | `asin_analysis`、`product_history` |
+| 与详情抽屉相同的TOP10完整商品，缺失时按需获取 | `keyword_asins` |
+| 完整价格、月销量、月销售额、BSR、评分/评论数趋势，过期/缺失时按需获取 | `asin_trends` |
+| Google网页搜索趋势 | `google_trends` |
+| 页面KPI、类目汇总、榜单、四象限、重点增长词曲线 | `dashboard_view` |
+| 实际采集任务、页码、覆盖及采集时间 | `collection_history` |
+| 项目研究方法、数据口径和ABA/Top10选品框架 | `market_knowledge` |
+
+需要更多记录时通过 `next_offset` 继续查询；宽范围查询可按关键词、ASIN、类目或周分批读取。数据库保留的历史不依赖前端保留周数。`keyword_asins`、`asin_trends` 和 `google_trends` 在看板服务中复用同一套缓存、节流与登录恢复逻辑。商品详情以实际 `fetched_at` 为准，关联的 ABA 周不代表当周商品实测；本地推算曲线、过期缓存、空数据和请求失败必须明确说明。
+
+知识资料是研究方法与口径来源，不是实时官方政策或账户实测。未采集的评论正文、订单成本、广告报表、Rufus曝光等仍需补充，Agent 不会因“全量检索”而编造这些数据。
+
 流程调度中台内的一个流程：**每周四自动登录卖家精灵刷新 Cookie → 全量抓取 ABA 全部 22 个大类 → 写入 SQLite → 重建看板 → 常驻 http://127.0.0.1:8766**
 
 ```
@@ -265,6 +296,50 @@ python -c "import yaml; from main import run; print(run(yaml.safe_load(open('con
 3. 失败会截图 `logs/login_failed_*.png` 并让流程失败告警（中台按 `notify_on` 通知）。
 
 所以正常情况下**不需要人工维护 Cookie**；只在登录失败（如需图形验证码）时按截图处理，或临时把 `auto_login` 设为 false 手动维护。
+
+## 研究员附件与专业技能
+
+输入框支持粘贴剪贴板图片，或通过「上传图片」「上传文件」选择 PNG/JPG/JPEG/WebP/GIF、PDF、XLSX、CSV、TXT、MD、DOCX。单文件上限 20 MB，每个对话最多关联 10 个附件。上传完成后可以只发送附件；已选文件保留在当前对话，后续提问继续检索，移除条目后不再授权该文件参与本轮分析。对话元数据保存在浏览器 sessionStorage。
+
+图片作为真实 `input_image` 交给 DeepSeek Flash 识别；本机不需要额外的视觉 API Key。TXT/MD、PDF 文字层、DOCX 正文/表格与 XLSX/CSV 的所有已接受行分段保存，可以按词检索并分页读取末尾。无文字层 PDF 通过 `read_attachment` 按页发送图像；有文字层的 PDF 图表也可用 `include_images=true` 查看。DOCX 内嵌图片暂不识别，需要单独上传，解析结果会提示此限制。
+
+附件工具 `list_attachments`、`search_attachments`、`read_attachment` 和 `analyze_table` 仅接受本轮对话明确关联的文件。数值统计覆盖指定工作表的全部行，支持分组、合计、均值、最小/最大值及空值统计，使用十进制计算。首行作为表头；XLSX 公式使用文件保存的计算结果，不执行宏或公式，没有缓存结果的公式为空值。文本中的货币符号、千分位、百分号不自动变换。过大的解压内容、超过 400 万字的提取文本、超过 15 万行或 200 万单元格的表格、超过 500 页的 PDF 会明确拒绝并要求拆分，不会悄悄截取开头当作全文。
+
+文件原件和检索索引存放在 `db/agent_attachments/`，不经静态文件服务公开，也不提交到 Git。清除浏览器对话或移除附件只移除对话关联，不删除服务器本地文件。请求模型分析时，相关原文片段与图片会发送给已配置的 DeepSeek 服务；附件中的指令不会成为系统指令。
+
+输入框下方的技能按钮只填入 `/命令`，不会立即发起分析。继续输入关键词、ASIN、类目或选品方向后发送即可收窄研究范围；无参数默认使用全部已采集历史周与全类目，附件技能默认使用本对话关联文件。
+
+| 命令 | 研究任务 |
+| --- | --- |
+| `/market-review` | 全周期市场复盘 |
+| `/opportunity` | 发现选品机会 |
+| `/selection` | 全流程选品研究 |
+| `/rufus` | Rufus 场景研究 |
+| `/keyword` | 关键词需求验证 |
+| `/asin` | ASIN 竞品研究 |
+| `/seasonality` | 季节性与趋势验证 |
+| `/competition` | 竞争格局与进入壁垒 |
+| `/profit` | 利润与盈亏平衡测算 |
+| `/ads` | 关键词与广告机会研究 |
+| `/listing` | 定位与 Listing 差异化 |
+| `/launch` | 上市验证与监控 |
+| `/risk` | 选品风险与反证 |
+| `/attachments` | 附件数据分析 |
+| `/reviews` | 竞品评论、购买动机、差评痛点与改进机会 |
+
+例如 `/seasonality owala`、`/asin B085DTZQNZ`、`/selection 轻量化露营收纳用品`。每个技能的研究步骤位于 `agent_skills/<命令>/SKILL.md`，由固定注册器加载；修改文件后下一次请求自动生效。技能按实际数据提出结论，不将排名增幅当搜索增长，不把供应商毛利估算当净利润，不虚构实时平台政策。
+
+安装依赖：`python -m pip install -r requirements.txt`。附件处理新增 Pillow、PyMuPDF、openpyxl 和 python-docx，沿用现有 OpenAI SDK/DeepSeek Responses 通道。
+
+### 卖家精灵 MCP 评论分析
+
+在服务端 `agent.local.json` 中增加 `sellersprite_mcp_url` 字段，填入官方 `https://mcp.sellersprite.com/mcp?secret-key=<你的密钥>`；也可设置 `SELLERSPRITE_MCP_URL` 环境变量（优先于本地文件）。保留已有 `api_key`，不要将密钥写入前端或提交 Git。公开状态接口只返回是否已配置，不返回地址或密钥；评论原文会作为分析证据发送到本项目配置的 DeepSeek 服务。
+
+点击「评论分析」或输入 `/reviews B0D3LGT8M3`，也可使用 `/reviews owala` 先在本地市场数据中定位代表竞品，再查其评论。直接 ASIN 查询不依赖本地市场数据库。`sellersprite_reviews` 仅连接官方 MCP、初始化会话并调用固定的 `review` 工具，不开放其他远端工具或加载远端提示词。
+
+参数遵循 [卖家精灵官方查评论文档](https://open.sellersprite.com/api/25)：`marketplace` 默认本项目站点（COM 映射 US），`asin` 为完整十位 ASIN，`page` 从 1 开始，`size` 每页最多 10；`star_list` 为 1–5 星，`type_list` 的 1/2/3/4 分别表示图片/视频/VP/Vine。参数映射到 MCP 的 `starList`/`typeList`。返回原文、日期、星级、VP/Vine、变体等上游实际提供的字段，同时保留页码、筛选、获取时间及总数（上游缺失时为 null）。结果不保存为每周 ABA 快照。
+
+报告引用真实评论 [D编号]，说明已读样本及缺页。筛选出的差评样本不能推算全商品差评率，评论主题频次不等于故障率；未返回的字段不编造。服务端支持 MCP JSON 与 SSE 响应、会话标识、工具目录分页和有界读取，网络/权限/额度/格式失败均明确标注“未获取评论”。当密钥仅开放 `secret_no_remaining` 时停止调用，不把次数用完当作零评论。恢复次数后下一次查询会重新核对工具目录；也可上传评论 CSV/XLSX 等文件进行附件分析。
 
 ## 注意
 

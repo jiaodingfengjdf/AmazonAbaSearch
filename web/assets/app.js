@@ -910,6 +910,7 @@ async function openDetail(rowIdx) {
   const week = (META && META.tableDate) || '';
   detailToken += 1;
   const token = detailToken;
+  disposeGoogleCharts();
 
   const box = (l, v) => `<div class="box"><div class="l">${l}</div><div class="v">${v}</div></div>`;
   $('drawerBody').innerHTML = `
@@ -935,6 +936,7 @@ async function openDetail(rowIdx) {
     </div>
     <div class="section-title">历史趋势（搜索量 / ABA 排名）</div>
     <div id="detailChart" style="height:300px"></div>
+    ${googleTrendSectionHtml()}
     <div class="section-title">TOP3 品牌</div>
     <div class="brand-list">${brands.length ? brands.map((b) => `<span class="tag">${b}</span>`).join('') : '<span class="flat">—</span>'}</div>
     <div class="section-title">ASIN TOP10（该词自然位前 10 个商品）
@@ -982,6 +984,9 @@ async function openDetail(rowIdx) {
     ],
   });
 
+  const googleSection = $('keywordGoogleTrend');
+  googleSection.querySelector('.google-toggle').onclick = () => toggleGoogleTrend(googleSection, keyword);
+  toggleGoogleTrend(googleSection, keyword);
   renderAsinSection(keyword, week, token, rowIdx);
 }
 
@@ -1144,7 +1149,9 @@ function asinCardHtml(a, idx) {
         </div>
         ${positions ? `<div class="ac-foot"><span class="ac-label">该词历史排名</span>${positions}</div>` : ''}
       </div>
-      <button class="ac-toggle" type="button">价格趋势</button>
+      <div class="ac-actions">
+        <button class="ac-toggle" type="button">价格趋势</button>
+      </div>
     </div>
     <div class="ac-chart" hidden></div>
   </div>`;
@@ -1152,7 +1159,7 @@ function asinCardHtml(a, idx) {
 
 async function toggleAsinTrend(card) {
   const asin = card.dataset.asin;
-  const panel = card.querySelector('.ac-chart');
+  const panel = card.querySelector('.ac-chart:not(.google-panel)');
   const btn = card.querySelector('.ac-toggle');
   if (!panel.hidden) {
     panel.hidden = true;
@@ -1237,7 +1244,115 @@ async function toggleAsinTrend(card) {
   });
 }
 
+const googleTrendCache = new Map();
+let googleChartId = 0;
+
+function googleTrendSectionHtml() {
+  return `<section id="keywordGoogleTrend" class="keyword-google-trend" aria-label="关键词谷歌趋势">
+    <div class="section-title">谷歌趋势（Google 网页搜索）<button class="ac-toggle google-toggle" type="button" aria-expanded="false" aria-controls="keywordGooglePanel">展开</button></div>
+    <div id="keywordGooglePanel" class="google-panel" hidden></div>
+  </section>`;
+}
+
+function disposeGoogleCharts() {
+  Object.keys(charts).filter(key => key.startsWith('google_')).forEach(key => {
+    charts[key].dispose();
+    delete charts[key];
+  });
+}
+
+function fetchGoogleTrend(keyword) {
+  const key = `${META?.market || 'COM'}|${keyword}`;
+  const cached = googleTrendCache.get(key);
+  if (cached && Date.now() - cached.at < 24 * 3600 * 1000) return cached.promise;
+  const entry = { at: Date.now(), promise: null };
+  entry.promise = fetch(`api/keyword/google-trends?kw=${encodeURIComponent(keyword)}`)
+    .then(async response => {
+      if (!response.ok) throw new Error('谷歌趋势服务暂不可用，请稍后重试');
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || '谷歌趋势加载失败，请稍后重试');
+      if (data.stale || data.error) googleTrendCache.delete(key);
+      return data;
+    }).catch(error => { googleTrendCache.delete(key); throw error; });
+  googleTrendCache.set(key, entry);
+  return entry.promise;
+}
+
+async function toggleGoogleTrend(card, keyword) {
+  const panel = card.querySelector('.google-panel');
+  const button = card.querySelector('.google-toggle');
+  const request = (Number(panel.dataset.request) || 0) + 1;
+  panel.dataset.request = request;
+  if (!panel.hidden) {
+    panel.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    button.textContent = '展开';
+    if (charts[panel.dataset.chart]) {
+      charts[panel.dataset.chart].dispose();
+      delete charts[panel.dataset.chart];
+    }
+    return;
+  }
+  const token = detailToken;
+  panel.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  button.textContent = '收起';
+  panel.innerHTML = '<div class="asin-loading" role="status"><span class="spinner small"></span>加载谷歌趋势…</div>';
+  const current = () => card.isConnected && !panel.hidden && token === detailToken && Number(panel.dataset.request) === request;
+  try {
+    const data = await fetchGoogleTrend(keyword);
+    if (!current()) return;
+    const points = data.trend || [];
+    if (!points.some(point => point.value != null)) {
+      panel.innerHTML = '<div class="asin-tip" role="status">该关键词暂无谷歌搜索趋势数据</div>';
+      return;
+    }
+    panel.innerHTML = `<div class="google-toolbar"><span class="google-keyword"></span><div class="google-ranges" aria-label="谷歌趋势时间范围">
+      <button class="ac-toggle" type="button" data-years="1" aria-pressed="false">近1年</button>
+      <button class="ac-toggle" type="button" data-years="3" aria-pressed="false">近3年</button>
+      <button class="ac-toggle" type="button" data-years="5" aria-pressed="true">全部</button>
+    </div></div><div class="ac-chart-box google-chart-box" role="img"></div><div class="ac-chart-tip"></div>`;
+    panel.querySelector('.google-keyword').textContent = `${keyword} · Google 网页搜索 · ${data.station}`;
+    panel.querySelector('.ac-chart-tip').textContent = `搜索指数为 0–100 的相对热度，范围切换保留近5年口径；${data.stale ? '缓存已过期 · ' + data.error : '更新于 ' + fmtDate(data.fetchedAt * 1000)}。`;
+    const dom = panel.querySelector('.google-chart-box');
+    dom.setAttribute('aria-label', `${keyword} 谷歌搜索指数趋势，支持下方缩放和时间范围按钮`);
+    const id = `google_${++googleChartId}`;
+    panel.dataset.chart = id;
+    const chart = charts[id] = themedChart(dom);
+    const render = years => {
+      const end = new Date(points[points.length - 1].time);
+      const start = new Date(end);
+      start.setUTCFullYear(start.getUTCFullYear() - years);
+      const selected = years === 5 ? points : points.filter(point => point.time >= start.getTime());
+      panel.querySelectorAll('[data-years]').forEach(btn => btn.setAttribute('aria-pressed', String(Number(btn.dataset.years) === years)));
+      chart.setOption({
+        animation: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+        grid: { left: 48, right: 20, top: 30, bottom: 78 },
+        tooltip: { trigger: 'axis', renderMode: 'richText', formatter: params => {
+          const point = selected[params[0]?.dataIndex];
+          return point ? `${point.date}\n谷歌搜索指数：${point.value == null ? '无数据' : point.label}` : '';
+        } },
+        xAxis: { type: 'category', boundaryGap: false, data: selected.map(point => point.date), axisLabel: { color: '#8b97b3', rotate: 35 } },
+        yAxis: { type: 'value', name: '搜索指数', min: 0, max: 100, axisLabel: { color: '#8b97b3' }, nameTextStyle: { color: '#8b97b3' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } } },
+        dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 4, height: 20 }],
+        series: [{ name: '谷歌搜索指数', type: 'line', showSymbol: false, connectNulls: false,
+          data: selected.map(point => ({ value: point.value, label: point.label })),
+          lineStyle: { width: 2, color: '#6ea8fe' }, itemStyle: { color: '#6ea8fe' } }],
+      }, { notMerge: true });
+    };
+    render(5);
+    panel.querySelectorAll('[data-years]').forEach(btn => { btn.onclick = () => render(Number(btn.dataset.years)); });
+  } catch (error) {
+    if (!current()) return;
+    panel.innerHTML = '<div class="asin-tip" role="status"></div><button class="ac-toggle" type="button">重试</button>';
+    panel.querySelector('.asin-tip').textContent = error.message || '谷歌趋势加载失败';
+    panel.querySelector('button').onclick = () => { panel.hidden = true; toggleGoogleTrend(card, keyword); };
+  }
+}
+
 function closeDetail() {
+  detailToken += 1;
+  disposeGoogleCharts();
   $('drawer').classList.remove('open');
   $('drawer').setAttribute('aria-hidden', 'true');
   agentKeyword = '';
