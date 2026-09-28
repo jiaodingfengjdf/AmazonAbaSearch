@@ -1,4 +1,24 @@
 :root { --agent-width: 50vw; --agent-accent: #8de2cc; }
+.agent-confirm-dialog { box-sizing: border-box; width: min(400px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid #ffffff24; border-radius: 14px; background: #182332; color: #d4dfeb; box-shadow: 0 24px 80px #0006; }
+.agent-confirm-dialog::backdrop { background: #0c132099; }
+.agent-confirm-heading { display: flex; align-items: center; gap: 12px; }
+.agent-confirm-heading h2 { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.5; }
+.agent-confirm-symbol { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border: 1px solid #f4a8a84d; border-radius: 9px; background: #f4a8a812; color: #f4a8a8; font-size: 18px; font-weight: 600; }
+.agent-confirm-dialog p { margin: 16px 0 24px; color: #a3b5c5; font-size: 13px; line-height: 1.8; }
+.agent-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.agent-confirm-actions button { min-height: 40px; padding: 8px 16px; border: 1px solid #ffffff30; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
+.agent-confirm-cancel { background: transparent; color: #d4dfeb; }
+.agent-confirm-cancel:hover { background: #ffffff0c; border-color: var(--agent-accent); }
+.agent-confirm-danger { background: #b53c45; border-color: #b53c45 !important; color: #fff; }
+.agent-confirm-danger:hover { background: #9f3039; border-color: #9f3039 !important; }
+.agent-confirm-actions button:active { transform: translateY(1px); }
+.agent-confirm-actions button:focus-visible { outline: 2px solid var(--agent-accent); outline-offset: 3px; }
+html[data-theme="light"] .agent-confirm-dialog { background: #fff; color: #243a51; border-color: #d5e3e6; box-shadow: 0 24px 80px #21385140; }
+html[data-theme="light"] .agent-confirm-dialog::backdrop { background: #1b324a78; }
+html[data-theme="light"] .agent-confirm-dialog p { color: #53647b; }
+html[data-theme="light"] .agent-confirm-symbol { color: #b53c45; background: #fff0f0; border-color: #edc2c5; }
+html[data-theme="light"] .agent-confirm-cancel { color: #425c70; border-color: #cbd9e5; }
+html[data-theme="light"] .agent-confirm-cancel:hover { background: #edf7f4; border-color: var(--agent-accent); }
 .agent-open { color: var(--agent-accent); border-color: #8de2cc40; background: #8de2cc0b; white-space: nowrap; }
 .agent-launcher { position: fixed; left: 0; top: 43%; z-index: 45; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 15px 9px; border: 1px solid #8de2cc55; border-left: 0; border-radius: 0 13px 13px 0; background: #14282c; color: var(--agent-accent); cursor: pointer; box-shadow: 0 8px 30px #0005; font-size: 22px; }
 .agent-launcher span { writing-mode: vertical-rl; font-size: 12px; letter-spacing: 2px; }

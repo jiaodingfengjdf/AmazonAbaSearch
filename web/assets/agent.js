@@ -8,6 +8,7 @@
   let records = [], active = null, returnFocus = null, configured = false;
   let conversations = [], activeConversationId = '', context = {}, statusCheckedAt = 0;
   let statusPromise = null, pendingKeyword = '', keywordStarting = false;
+  let clearConversationId = '';
   let attachments = [], uploads = 0, skills = [], suggestions = [], suggestionIndex = 0;
   let attachmentPolicy = { formats: ['png','jpg','jpeg','webp','gif','pdf','xlsx','csv','txt','md','docx'], max_file_bytes: 20971520, max_files: 10 };
   const welcome = el('agentWelcome');
@@ -19,6 +20,17 @@
   function savedAttachments(items) {
     return (Array.isArray(items) ? items : []).filter(a => a && /^[a-f0-9]{32}$/i.test(a.id) && typeof a.name === 'string')
       .slice(0, 10).map(a => ({ ...attachmentMetadata(a), state: 'ready' }));
+  }
+  function linkedAttachments() {
+    const linked = new Map();
+    for (const record of records) {
+      if (record.role === 'user' && record.attachmentsSent !== false) for (const item of record.attachments || []) linked.set(item.id, attachmentMetadata(item));
+    }
+    for (const item of attachments) if (item.state === 'ready') linked.set(item.id, attachmentMetadata(item));
+    return [...linked.values()];
+  }
+  function attachmentCount() {
+    return linkedAttachments().length + attachments.filter(a => a.state !== 'ready').length;
   }
   function renderAttachments() {
     el('agentAttachments').replaceChildren(...attachments.map(item => {
@@ -64,8 +76,8 @@
   }
   async function addFiles(files) {
     if (active || uploads) { el('agentLive').textContent = '请等当前上传或分析完成后添加附件。'; return; }
-    const incoming = Array.from(files), remaining = attachmentPolicy.max_files - attachments.length;
-    if (incoming.length > remaining) el('agentLive').textContent = `每个对话最多 ${attachmentPolicy.max_files} 个附件，请移除附件后继续添加。`;
+    const incoming = Array.from(files), remaining = attachmentPolicy.max_files - attachmentCount();
+    if (incoming.length > remaining) el('agentLive').textContent = `每个对话最多 ${attachmentPolicy.max_files} 个附件，请移除待发送附件或新建对话后继续添加。`;
     const batch = incoming.slice(0, Math.max(0, remaining)).map(file => {
       const extension = file.name.split('.').pop().toLowerCase();
       const error = !attachmentPolicy.formats.includes(extension) ? '不支持此格式，请改用图片、PDF、XLSX、CSV、TXT、MD 或 DOCX' : file.size > attachmentPolicy.max_file_bytes ? '文件超过 20 MB，请压缩或拆分后重新添加' : file.size === 0 ? '文件为空，请重新选择' : '';
@@ -233,7 +245,7 @@
     el('agentNew').title = emptyCurrent ? '当前已是空白对话，可以直接输入问题' : '新建对话';
     el('agentClear').disabled = !!active || uploading || (!records.length && !attachments.length);
     el('agentConversations').disabled = !!active || uploading;
-    el('agentUpload').disabled = !!active || uploading || attachments.length >= attachmentPolicy.max_files;
+    el('agentUpload').disabled = !!active || uploading || attachmentCount() >= attachmentPolicy.max_files;
     el('agentImageUpload').disabled = el('agentUpload').disabled;
     el('agentFileInput').disabled = !!active || uploading;
     el('agentImageInput').disabled = !!active || uploading;
@@ -293,6 +305,7 @@
       if (current) current.attachments = attachments.filter(a => a.state === 'ready').map(attachmentMetadata);
       if (current) current.records = records.slice(-20).map((r) => ({ role: r.role, content: r.content.slice(0,24000), context: r.context,
         attachments: (r.attachments || []).map(attachmentMetadata),
+        attachmentsSent: r.attachmentsSent,
         status: r.status === 'pending' ? 'interrupted' : r.status, note: r.note,
         sources: r.sources.map(({ id, label, week, url, summary, scope, arguments: args }) => ({ id, label, week, url, summary, scope, arguments: args })) }));
       if (pruneBlankConversations()) updateConversationSelect();
@@ -312,7 +325,10 @@
     attachments.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
     const current = conversations.find(c => c.id === activeConversationId);
     records = (current?.records || []).map(r => ({ ...r, sources: [...r.sources] }));
-    attachments = savedAttachments(current?.attachments);
+    // Older sessions kept sent files in the composer as well as message history.
+    const sentIds = new Set(records.flatMap((r, i) => r.role === 'user' && records[i + 1]?.status === 'completed'
+      ? (r.attachments || []).map(a => a.id) : []));
+    attachments = savedAttachments(current?.attachments).filter(a => !sentIds.has(a.id));
     feed.querySelectorAll('.agent-message').forEach(n => n.remove());
     welcome.hidden = false;
     records.forEach(r => { append(r); renderSources(r); });
@@ -437,15 +453,16 @@
     hideSuggestions();
     refreshContext();
     const snapshot = structuredClone(context), prior = history();
-    const user = { role: 'user', content: question, context: snapshot, attachments: selected, sources: [], status: 'completed' };
+    const linked = linkedAttachments(), pendingAttachments = attachments;
+    const user = { role: 'user', content: question, context: snapshot, attachments: selected, attachmentsSent: false, sources: [], status: 'completed' };
     const reply = { role: 'assistant', content: '', context: snapshot, sources: [], status: 'pending' };
     records.push(user, reply); append(user); append(reply);
     const current = conversations.find(c => c.id === activeConversationId);
     if (current && current.title === '新对话') { current.title = question.slice(0, 28); updateConversationSelect(); }
     const run = { id: requestId(), controller: new AbortController(), stopped: false };
-    active = run; input.value = ''; renderAttachments(); updateControls();
+    active = run; input.value = ''; attachments = []; renderAttachments(); updateControls(); persist();
     el('agentLive').classList.add('busy'); el('agentLive').textContent = '正在连接研究员…';
-    let timer = null, completed = false;
+    let timer = null, completed = false, accepted = false;
     const paint = () => {
       const bottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 140;
       render(reply); if (bottom) feed.scrollTop = feed.scrollHeight; timer = null;
@@ -468,7 +485,7 @@
       if (event.type === 'error') throw new Error(event.message);
     };
     try {
-      const payload = { request_id: run.id, message: question, history: prior, context: snapshot, attachment_ids: selected.map(a => a.id) };
+      const payload = { request_id: run.id, message: question, history: prior, context: snapshot, attachment_ids: linked.map(a => a.id) };
       let encoded = JSON.stringify(payload);
       while (payload.history.length && new TextEncoder().encode(encoded).length > 120 * 1024) {
         payload.history.splice(0,2); encoded = JSON.stringify(payload);
@@ -480,6 +497,9 @@
         throw new Error(err.error || `分析服务返回 ${response.status}`);
       }
       if (!response.body) throw new Error('当前浏览器不支持流式响应');
+      accepted = true;
+      user.attachmentsSent = true; persist();
+      pendingAttachments.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
       const reader = response.body.getReader(), decoder = new TextDecoder();
       let buffer = '';
       while (true) {
@@ -494,6 +514,7 @@
       }
       if (!completed) throw new Error('连接已中断，请重试本轮问题');
     } catch (err) {
+      if (!accepted) attachments = pendingAttachments;
       reply.status = 'interrupted';
       reply.note = run.stopped || err.name === 'AbortError' ? '已停止生成。可修改问题后重新发送。' : err.message;
       el('agentLive').textContent = reply.note;
@@ -544,7 +565,20 @@
     createConversation(); input.focus();
   };
   el('agentClear').onclick = () => {
-    if (active || uploads || (!records.length && !attachments.length) || !window.confirm('清除当前对话的所有消息和附件？')) return;
+    if (active || uploads || (!records.length && !attachments.length) || el('agentClearDialog').open) return;
+    clearConversationId = activeConversationId;
+    el('agentClearDialog').showModal();
+    el('agentClearCancel').focus();
+  };
+  function dismissClearDialog() {
+    el('agentClearDialog').close(); clearConversationId = '';
+    el('agentClear').focus();
+  }
+  el('agentClearCancel').onclick = dismissClearDialog;
+  el('agentClearDialog').oncancel = event => { event.preventDefault(); dismissClearDialog(); };
+  el('agentClearConfirm').onclick = () => {
+    if (active || uploads || clearConversationId !== activeConversationId) { dismissClearDialog(); return; }
+    dismissClearDialog();
     const current = conversations.find(c => c.id === activeConversationId);
     if (current) { current.records = []; current.attachments = []; current.title = '新对话'; }
     showConversation(); persist(); input.focus();
@@ -565,6 +599,8 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
   document.addEventListener('keydown', (event) => {
+    // The modal owns Escape and focus traversal while it is open.
+    if (el('agentClearDialog').open) return;
     if (!panel.classList.contains('open')) return;
     if (event.key === 'Escape') { event.stopImmediatePropagation(); if (suggestions.length) hideSuggestions(); else close(); }
     if (event.key === 'Tab' && mobile.matches && !(document.activeElement === input && suggestions.length && !event.shiftKey)) {

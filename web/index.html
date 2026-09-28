@@ -7,7 +7,7 @@
   <link rel="icon" href="data:," />
   <script>try { document.documentElement.dataset.theme = localStorage.getItem('aba-theme') === 'dark' ? 'dark' : 'light'; } catch (_) {}</script>
   <link rel="stylesheet" href="assets/style.css?v=19" />
-  <link rel="stylesheet" href="assets/agent.css?v=7" />
+  <link rel="stylesheet" href="assets/agent.css?v=8" />
 </head>
 <body>
   <div class="bg-glow" aria-hidden="true"></div>
@@ -125,7 +125,7 @@
     <div class="agent-live-status" id="agentLive" role="status" aria-live="polite"></div>
     <form id="agentForm" class="agent-composer" novalidate>
       <div id="agentAttachments" class="agent-attachments" aria-label="本对话参与分析的附件"></div>
-      <p id="agentAttachmentHelp" class="agent-attachment-help" hidden>附件会保留在当前对话供追问使用；移除后不再参与分析。</p>
+      <p id="agentAttachmentHelp" class="agent-attachment-help" hidden>附件已上传，随本次消息发送；发送后移入对话记录，可继续追问。</p>
       <label for="agentInput" class="agent-sr-only">输入分析问题</label>
       <textarea id="agentInput" rows="3" maxlength="6000" placeholder="输入 / 选择技能，或填写关键词、ASIN、选品方向；支持粘贴图片" aria-describedby="agentComposerHelp" aria-controls="agentSlashSuggestions" aria-expanded="false" aria-autocomplete="list"></textarea>
       <div id="agentSlashSuggestions" class="agent-slash-suggestions" role="listbox" aria-label="研究技能" hidden></div>
@@ -137,10 +137,19 @@
     <footer class="agent-footer"><span>DeepSeek · 基于已采集数据分析</span><button id="agentExport" type="button">导出对话 ↓</button></footer>
   </aside>
 
+  <dialog id="agentClearDialog" class="agent-confirm-dialog" aria-labelledby="agentClearTitle" aria-describedby="agentClearDescription">
+    <div class="agent-confirm-heading"><span class="agent-confirm-symbol" aria-hidden="true">!</span><h2 id="agentClearTitle">清除当前对话？</h2></div>
+    <p id="agentClearDescription">将清除当前对话的所有消息和附件关联，清除后无法恢复。</p>
+    <div class="agent-confirm-actions">
+      <button id="agentClearCancel" type="button" class="agent-confirm-cancel" autofocus>取消</button>
+      <button id="agentClearConfirm" type="button" class="agent-confirm-danger">清除对话</button>
+    </div>
+  </dialog>
+
   <div class="loading" id="loading"><div class="spinner"></div><span id="loadingText">加载数据…</span></div>
 
   <script src="assets/vendor/echarts.min.js"></script>
   <script src="assets/app.js?v=25"></script>
-  <script src="assets/agent.js?v=8"></script>
+  <script src="assets/agent.js?v=10"></script>
 </body>
 </html>

@@ -14,6 +14,8 @@ class Element {
   querySelectorAll() { return []; }
   focus() {}
   click() { this.clicked = true; }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
   setSelectionRange() {}
   scrollIntoView() {}
 }
@@ -22,7 +24,7 @@ async function setup(extraFetch, saved = '') {
   const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const context = vm.createContext({
     document: { getElementById: get, createElement: tag => new Element(tag), createDocumentFragment: () => new Element(), createTextNode: text => ({ textContent: text }), querySelector: () => new Element(), querySelectorAll: () => [], body: new Element(), addEventListener() {} },
-    window: { matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, dispatchEvent() {}, getAbaAgentContext: () => ({ keyword: 'test' }), confirm: () => true },
+    window: { matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {}, dispatchEvent() {}, getAbaAgentContext: () => ({ keyword: 'test' }), confirm: () => { throw new Error('native confirmation must not be used'); } },
     sessionStorage: { getItem: k => writes.get(k), setItem: (k,v) => writes.set(k,v) },
     location: { href: 'http://localhost/', origin: 'http://localhost' }, crypto: require('node:crypto').webcrypto,
     fetch: async (url, options) => { calls.push({ url, options }); if (url.endsWith('/status')) return { ok: true, json: async () => ({ ok: true, configured: true, data_available: true, skills: [{ id: 'market', title: '市场研究', description: '趋势与竞争', hint: '填写关键词或 ASIN' }] }) }; return extraFetch(url, options); },
@@ -52,24 +54,61 @@ test('skills select on click and slash Enter/Tab without sending prematurely', a
   assert.equal(s.calls.filter(c => c.url.endsWith('/chat')).length, 0);
 });
 
-test('file-only send uses default message, follow-up retains IDs, metadata restores without blobs', async () => {
+test('file-only send clears composer, follow-up retains IDs, metadata restores without pending files', async () => {
   const s = await setup(url => url.endsWith('/attachments') ? uploadResponse : chatResponse());
   await s.api.addFiles([file()]);
   assert.equal(s.get('agentSend').disabled, false);
   await s.api.send();
   let payload = JSON.parse(s.calls.find(c => c.url.endsWith('/chat')).options.body);
   assert.equal(payload.message, '分析上传的附件'); assert.deepEqual(payload.attachment_ids, [attachment.id]);
+  assert.equal(s.api.getAttachments().length, 0);
+  assert.equal(s.get('agentAttachments').children.length, 0);
+  assert.equal(s.get('agentAttachmentHelp').hidden, true);
+  assert.equal(s.get('agentSend').disabled, true);
   s.get('agentInput').value = '继续分析之前的表格'; await s.api.send();
   payload = JSON.parse(s.calls.filter(c => c.url.endsWith('/chat')).at(-1).options.body);
   assert.deepEqual(payload.attachment_ids, [attachment.id]);
   const persisted = s.writes.get('aba-research-chat-v3');
   assert.equal(persisted.includes('"file"'), false); assert.equal(persisted.includes('previewUrl'), false);
   const restored = await setup(() => chatResponse(), persisted);
-  assert.equal(restored.api.getAttachments()[0].name, 'report.csv');
+  assert.equal(restored.api.getAttachments().length, 0);
   assert.equal(restored.api.getRecords()[0].attachments[0].id, attachment.id);
-  restored.get('agentAttachments').children[0].children.at(-1).onclick();
+  restored.get('agentInput').value = '继续分析'; await restored.api.send();
+  assert.deepEqual(JSON.parse(restored.calls.find(c => c.url.endsWith('/chat')).options.body).attachment_ids, [attachment.id]);
+  assert.equal(restored.api.getRecords()[2].attachments.length, 0);
+  restored.api.createConversation();
   restored.get('agentInput').value = '按 ABA 分析'; await restored.api.send();
-  assert.deepEqual(JSON.parse(restored.calls.find(c => c.url.endsWith('/chat')).options.body).attachment_ids, []);
+  assert.deepEqual(JSON.parse(restored.calls.filter(c => c.url.endsWith('/chat')).at(-1).options.body).attachment_ids, []);
+});
+
+test('Enter consumes pending files immediately while chat is still connecting', async () => {
+  let release;
+  const s = await setup(url => url.endsWith('/attachments') ? uploadResponse : new Promise(resolve => { release = resolve; }));
+  await s.api.addFiles([file()]);
+  s.get('agentInput').value = '分析表格';
+  s.get('agentInput').onkeydown({ key: 'Enter', preventDefault() {} });
+  assert.equal(s.api.getAttachments().length, 0);
+  assert.equal(s.get('agentAttachments').children.length, 0);
+  assert.equal(s.api.getRecords()[0].attachments[0].id, attachment.id);
+  const saved = JSON.parse(s.writes.get('aba-research-chat-v3'));
+  assert.equal(saved.conversations[0].attachments.length, 0);
+  assert.equal(saved.conversations[0].records[0].attachments[0].id, attachment.id);
+  release(chatResponse());
+  await new Promise(resolve => setImmediate(resolve));
+});
+
+test('restore removes legacy sent chips but keeps genuinely unsent files', async () => {
+  const draft = { ...attachment, id: 'b'.repeat(32), name: 'draft.csv' };
+  const saved = JSON.stringify({activeConversationId:'old', conversations:[{
+    id:'old', title:'分析附件', attachments:[attachment, draft], records:[
+      {role:'user', content:'分析附件', attachments:[attachment], context:{}, sources:[], status:'completed'},
+      {role:'assistant', content:'完成', context:{}, sources:[], status:'completed'}
+    ]
+  }]});
+  const s = await setup(() => chatResponse(), saved);
+  assert.deepEqual(Array.from(s.api.getAttachments(), a => a.id), [draft.id]);
+  s.get('agentInput').value = '继续'; await s.api.send();
+  assert.deepEqual(JSON.parse(s.calls.find(c => c.url.endsWith('/chat')).options.body).attachment_ids, [attachment.id, draft.id]);
 });
 
 test('upload locks conversation switches and blocks send; failed upload retries', async () => {
@@ -97,6 +136,32 @@ test('failed chat retains selected attachments for retry', async () => {
   await s.api.addFiles([file()]); await s.api.send();
   assert.equal(s.api.getAttachments()[0].id, attachment.id);
   assert.equal(s.get('agentInput').value, '分析上传的附件'); assert.equal(s.get('agentSend').disabled, false);
+  s.get('agentAttachments').children[0].children.at(-1).onclick();
+  s.get('agentInput').value = '不使用附件'; await s.api.send();
+  assert.deepEqual(JSON.parse(s.calls.filter(c => c.url.endsWith('/chat')).at(-1).options.body).attachment_ids, []);
+});
+
+test('accepted stream failure keeps sent files out of composer and available for follow-up', async () => {
+  const s = await setup(url => url.endsWith('/attachments') ? uploadResponse : new Response(JSON.stringify({type:'error', message:'分析中断'}) + '\n'));
+  await s.api.addFiles([file()]); await s.api.send();
+  assert.equal(s.api.getAttachments().length, 0);
+  assert.equal(s.api.getRecords()[0].attachments[0].id, attachment.id);
+  await s.api.send();
+  assert.deepEqual(JSON.parse(s.calls.filter(c => c.url.endsWith('/chat')).at(-1).options.body).attachment_ids, [attachment.id]);
+});
+
+test('sent files still count toward the conversation attachment limit', async () => {
+  let next = 0;
+  const s = await setup(url => url.endsWith('/attachments') ? {ok:true, json:async () => ({ok:true, attachment:{...attachment, id:(++next).toString(16).padStart(32, '0')}})} : chatResponse());
+  await s.api.addFiles(Array.from({length:10}, (_, i) => file(`${i}.csv`)));
+  await s.api.send();
+  assert.equal(s.api.getAttachments().length, 0);
+  assert.equal(s.get('agentUpload').disabled, true);
+  await s.api.addFiles([file('extra.csv')]);
+  assert.equal(next, 10);
+  s.api.createConversation();
+  await s.api.addFiles([file('new.csv')]);
+  assert.equal(next, 11);
 });
 
 
@@ -196,7 +261,43 @@ test('new reuses a saved empty conversation and clear removes duplicate blanks',
   assert.equal(state.activeConversationId, 'blank'); assert.equal(state.conversations.length, 2);
   s.get('agentConversations').onchange({target:{value:'history'}});
   s.get('agentClear').onclick();
+  s.get('agentClearConfirm').onclick();
   state = JSON.parse(s.writes.get('aba-research-chat-v3'));
   assert.equal(state.activeConversationId, 'history'); assert.equal(state.conversations.length, 1);
   assert.equal(s.get('agentConversations').children.length, 1);
+});
+
+test('clear confirmation opens in-page and cancellation preserves messages and draft attachments', async () => {
+  const s = await setup(url => url.endsWith('/attachments') ? uploadResponse : chatResponse());
+  s.get('agentInput').value = '研究问题'; await s.api.send();
+  await s.api.addFiles([file()]);
+  const before = s.writes.get('aba-research-chat-v3');
+  s.get('agentClear').onclick();
+  assert.equal(s.get('agentClearDialog').open, true);
+  assert.equal(s.api.getRecords().length, 2);
+  s.get('agentClearCancel').onclick();
+  assert.equal(s.get('agentClearDialog').open, false);
+  assert.equal(s.writes.get('aba-research-chat-v3'), before);
+  s.get('agentClear').onclick();
+  let prevented = false;
+  s.get('agentClearDialog').oncancel({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(s.get('agentClearDialog').open, false);
+  assert.equal(s.api.getAttachments()[0].id, attachment.id);
+});
+
+test('clear confirmation removes only the selected conversation contents after confirmation', async () => {
+  const s = await setup(url => url.endsWith('/attachments') ? uploadResponse : chatResponse());
+  s.get('agentInput').value = '保留的对话'; await s.api.send();
+  const original = JSON.parse(s.writes.get('aba-research-chat-v3')).activeConversationId;
+  s.api.createConversation();
+  await s.api.addFiles([file()]);
+  s.get('agentClear').onclick();
+  assert.equal(s.api.getAttachments().length, 1);
+  s.get('agentClearConfirm').onclick();
+  assert.equal(s.get('agentClearDialog').open, false);
+  assert.equal(s.api.getRecords().length, 0);
+  assert.equal(s.api.getAttachments().length, 0);
+  const saved = JSON.parse(s.writes.get('aba-research-chat-v3'));
+  assert.equal(saved.conversations.find(c => c.id === original).records.length, 2);
 });
