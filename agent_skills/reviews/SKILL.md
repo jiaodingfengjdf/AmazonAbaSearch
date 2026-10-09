@@ -2,7 +2,7 @@
 id: reviews
 title: 评论分析
 description: 通过卖家精灵 MCP 获取竞品真实评论，分析购买动机、使用场景，推断潜在差评痛点与产品改进机会。
-hint: 可填 ASIN、关键词或选品方向，例如 /reviews B0D3LGT8M3
+hint: 可填 ASIN、关键词或选品方向，例如 B0D3LGT8M3
 category: 用户研究
 ---
 # 评论分析

@@ -6,10 +6,10 @@
   "author": "JDF",
   "entry_point": "main:run",
   "schedule": {
-    "cron": "0 6 * * 4",
+    "cron": "0 10 * * 4",
     "timezone": "Asia/Shanghai"
   },
-  "timeout_seconds": 7200,
+  "timeout_seconds": 0,
   "retry": {
     "max_attempts": 2,
     "backoff_seconds": 600

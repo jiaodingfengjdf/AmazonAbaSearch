@@ -1,7 +1,14 @@
-"""Server-side, review-only SellerSprite Streamable HTTP MCP adapter.
+"""Server-side SellerSprite Streamable HTTP MCP adapter.
 
-Official contract: https://open.sellersprite.com/api/25 (MCP code: review).
-No other remote tools or remote instructions become Agent capabilities.
+Official contract: https://open.sellersprite.com/api/25 .
+Serves two capabilities over the same trusted, server-only transport:
+  * ``reviews()``  — the fixed, review-only `review` tool (kept stable for the
+    dedicated /reviews skill and its regression tests).
+  * ``list_tools()`` / ``call()`` — a bounded generic channel that exposes the
+    account's real MCP tool catalog to the researcher Agent. Only tools that the
+    upstream catalog actually lists can be called; remote descriptions and
+    prompts never become local instructions, and no remote tool gains extra
+    privileges here.
 """
 from __future__ import annotations
 
@@ -20,6 +27,18 @@ MARKET_MAP = {'COM': 'US', 'CO.UK': 'UK', 'CO.JP': 'JP', 'COM.AU': 'AU', 'COM.MX
 FIELDS = {'author', 'title', 'content', 'date', 'star', 'authorLabels', 'skus', 'images', 'videos', 'likes', 'image', 'video', 'verified', 'vine', 'free', 'experience', 'id', 'reviewId', 'url'}
 MAX_BYTES = 1_000_000
 MAX_SECONDS = 45
+MAX_TOOL_RESULT_BYTES = 900_000
+CATALOG_TTL_SECONDS = 600
+
+# Generic-channel limits. The remote catalog is the source of truth for which
+# tools exist; these caps only bound cost, payload and abuse on our side.
+MAX_TOOL_ARGUMENT_DEPTH = 8
+MAX_TOOL_ARGUMENT_NODES = 2000
+MAX_TOOL_TEXT = 4000
+
+# Tool-name namespace used when projecting remote tools into the Agent tool list.
+# Selected so that no projected name can collide with a built-in local tool.
+TOOL_PREFIX = "sellersprite_"
 
 
 class MCPError(Exception):
@@ -157,24 +176,59 @@ class _Client:
         self.headers['MCP-Protocol-Version'] = version
         self.rpc('notifications/initialized', notification=True)
 
-    def review_available(self):
-        params, cursors = {}, set()
-        for _ in range(10):
+    def catalog(self):
+        """Return the full, de-duplicated upstream tool catalog.
+
+        Raises ``quota_exhausted`` when the account exposes the sentinel
+        ``secret_no_remaining`` tool, which the upstream service uses to signal
+        that the monthly quota is spent.
+        """
+        tools, seen, cursors = [], {}, set()
+        params = {}
+        for _ in range(20):
             value = self.rpc('tools/list', params)
-            tools = value.get('tools')
-            if not isinstance(tools, list):
+            page = value.get('tools')
+            if not isinstance(page, list):
                 raise MCPError('protocol_error', '卖家精灵 MCP 工具目录无效')
-            names = {item.get('name') for item in tools if isinstance(item, dict)}
+            names = set()
+            for item in page:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get('name')
+                if not isinstance(name, str) or not name:
+                    continue
+                names.add(name)
+                if name not in seen:
+                    seen[name] = item
+                    tools.append(item)
             if 'secret_no_remaining' in names:
-                raise MCPError('quota_exhausted', '卖家精灵 MCP 本月可用次数已用完，恢复次数后再查询评论')
-            if 'review' in names:
-                return
+                raise MCPError('quota_exhausted', '卖家精灵 MCP 本月可用次数已用完，恢复次数后再查询')
             cursor = value.get('nextCursor')
             if not isinstance(cursor, str) or not cursor or cursor in cursors:
                 break
             cursors.add(cursor)
             params = {'cursor': cursor}
-        raise MCPError('review_unavailable', '卖家精灵 MCP 当前未开放查评论工具，请检查账户权限或额度')
+        if not tools:
+            raise MCPError('tool_unavailable', '卖家精灵 MCP 目录为空，请检查账户权限或额度')
+        return tools
+
+    def require_tool(self, name, *, code='tool_unavailable', message=None):
+        """Verify the upstream catalog currently lists ``name``."""
+        names = {item.get('name') for item in self.catalog()}
+        if name not in names:
+            raise MCPError(code, message or f'卖家精灵 MCP 当前未开放 {name} 工具，请检查账户权限或额度')
+
+    def review_available(self):
+        self.require_tool('review', code='review_unavailable',
+                          message='卖家精灵 MCP 当前未开放查评论工具，请检查账户权限或额度')
+
+
+_SUCCESS_CODES = (0, 200, '0', '200', 'SUCCESS', 'OK', 'ok', None)
+
+
+def _is_failure_code(code):
+    """上游 code 采用字符串成功码（如 'OK'）；只有明确非成功码才算失败。"""
+    return code not in _SUCCESS_CODES
 
 
 def _review_page(result):
@@ -196,7 +250,7 @@ def _review_page(result):
             if not value or all(isinstance(row, dict) and ('content' in row or 'star' in row or 'title' in row) for row in value):
                 return value, total
         if isinstance(value, dict):
-            if value.get('success') is False or value.get('ok') is False or ('code' in value and value['code'] not in (0, 200, '0', '200', 'SUCCESS', None)):
+            if value.get('success') is False or value.get('ok') is False or ('code' in value and _is_failure_code(value['code'])):
                 raise MCPError('review_failed', '卖家精灵查评论未成功，请检查账户额度、权限或 ASIN')
             for key in ('total', 'totalCount', 'totalElements'):
                 if type(value.get(key)) is int and value[key] >= 0:
@@ -246,3 +300,179 @@ def reviews(args, *, url='', transport=None):
         return {**base, 'ok': False, 'error_code': 'network_error', 'error': '连接卖家精灵 MCP 超时或网络不可用，请稍后重试'}
     except (ValueError, TypeError, KeyError):
         return {**base, 'ok': False, 'error_code': 'protocol_error', 'error': '卖家精灵 MCP 响应无法解析，未获取有效评论'}
+
+
+# --------------------------------------------------------------------------
+# Generic, bounded tool channel.
+#
+# The catalog is the upstream `tools/list` result. We never invent tools and
+# never let remote text (descriptions, prompts, error bodies) act as local
+# instructions — descriptions are surfaced to the model only as untrusted
+# tool metadata, and every result is size-capped and secret-scrubbed.
+# --------------------------------------------------------------------------
+
+_CATALOG = {"auth": "", "at": 0.0, "tools": None, "error": None}
+
+
+def _prune(value, depth=0):
+    """Bound a model-supplied argument tree and reject non-JSON structures."""
+    if depth > MAX_TOOL_ARGUMENT_DEPTH:
+        raise ValueError('卖家精灵 MCP 查询参数嵌套过深')
+    if isinstance(value, bool) or value is None or isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        if len(value) > MAX_TOOL_TEXT:
+            raise ValueError('卖家精灵 MCP 查询参数过长')
+        return value
+    if isinstance(value, list):
+        if len(value) > MAX_TOOL_ARGUMENT_NODES:
+            raise ValueError('卖家精灵 MCP 查询参数条目过多')
+        return [_prune(item, depth + 1) for item in value]
+    if isinstance(value, dict):
+        if len(value) > MAX_TOOL_ARGUMENT_NODES:
+            raise ValueError('卖家精灵 MCP 查询参数条目过多')
+        result = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError('卖家精灵 MCP 查询参数键无效')
+            result[key] = _prune(item, depth + 1)
+        return result
+    raise ValueError('卖家精灵 MCP 查询参数类型无效')
+
+
+def _extract_tool_text(result):
+    """Flatten an MCP tools/call result into model-facing JSON value(s)."""
+    if result.get('isError'):
+        raise MCPError('tool_failed', '卖家精灵 MCP 工具执行失败，请检查参数或账户额度，不代表结果为 0')
+    values = []
+    for content in result.get('content', []):
+        if not isinstance(content, dict):
+            continue
+        kind = content.get('type')
+        if kind == 'text':
+            text = content.get('text')
+            if not isinstance(text, str):
+                continue
+            try:
+                values.append(json.loads(text))
+            except (ValueError, TypeError):
+                values.append(text)
+        elif kind in ('image', 'resource'):
+            values.append({'type': kind, 'note': '非文本内容已省略'})
+    if result.get('structuredContent') is not None:
+        values.insert(0, result['structuredContent'])
+    if not values:
+        raise MCPError('unrecognized_result', '卖家精灵 MCP 未返回可解析内容')
+    return values[0] if len(values) == 1 else values
+
+
+def _catalog_key(url):
+    return _validate_url(url)
+
+
+def list_tools(*, url='', transport=None, force=False):
+    """Return the upstream tool catalog for this exact configured URL.
+
+    Result: ``{"ok": bool, "tools": [{"name", "description", "inputSchema"}],
+    "error_code", "error", "cached": bool}``. Never raises; failures degrade to
+    ``ok: False`` so the Agent can simply run without remote tools.
+    """
+    base = {'source': 'sellersprite_mcp', 'tools': []}
+    if not url:
+        return {**base, 'ok': False, 'cached': False, 'error_code': 'not_configured',
+                'error': '尚未配置卖家精灵 MCP，请在服务端设置 sellersprite_mcp_url 或 SELLERSPRITE_MCP_URL'}
+    try:
+        key = _validate_url(url)
+    except ValueError as exc:
+        return {**base, 'ok': False, 'cached': False, 'error_code': 'invalid_configuration', 'error': str(exc)}
+    now = time.monotonic()
+    cached = _CATALOG['tools'] if _CATALOG['auth'] == key else None
+    if cached is not None and not force and now - _CATALOG['at'] < CATALOG_TTL_SECONDS:
+        return {**base, 'ok': True, 'cached': True, 'tools': [dict(item) for item in cached]}
+    try:
+        with httpx.Client(transport=transport, follow_redirects=False) as client:
+            mcp = _Client(client, url)
+            mcp.initialize()
+            tools = mcp.catalog()
+    except MCPError as exc:
+        return {**base, 'ok': False, 'cached': False, 'error_code': exc.code, 'error': exc.message}
+    except httpx.HTTPError:
+        return {**base, 'ok': False, 'cached': False, 'error_code': 'network_error',
+                'error': '连接卖家精灵 MCP 超时或网络不可用，请稍后重试'}
+    except (ValueError, TypeError, KeyError):
+        return {**base, 'ok': False, 'cached': False, 'error_code': 'protocol_error',
+                'error': '卖家精灵 MCP 目录无法解析'}
+    projected = [{'name': item.get('name'), 'description': item.get('description') or '',
+                  'inputSchema': item.get('inputSchema') or {'type': 'object'}} for item in tools]
+    _CATALOG.update({'auth': key, 'at': now, 'tools': projected, 'error': None})
+    return {**base, 'ok': True, 'cached': False, 'tools': [dict(item) for item in projected]}
+
+
+def call(name, arguments, *, url='', transport=None):
+    """Invoke one upstream tool by its real name with bounded arguments.
+
+    The tool must be present in the current catalog; results are capped and the
+    secret key is scrubbed. Returns a structured dict (never raises).
+    """
+    base = {'source': 'sellersprite_mcp', 'remote_tool': name,
+            'fetched_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            'ok': False}
+    if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', name):
+        return {**base, 'error_code': 'invalid_tool', 'error': '卖家精灵 MCP 工具名无效'}
+    if not url:
+        return {**base, 'error_code': 'not_configured', 'error': '尚未配置卖家精灵 MCP，请在服务端设置 sellersprite_mcp_url 或 SELLERSPRITE_MCP_URL'}
+    try:
+        arguments = _prune(arguments if arguments is not None else {})
+    except ValueError as exc:
+        return {**base, 'error_code': 'invalid_arguments', 'error': str(exc)}
+    if not isinstance(arguments, dict):
+        return {**base, 'error_code': 'invalid_arguments', 'error': '卖家精灵 MCP 查询参数必须是对象'}
+    try:
+        secret = _validate_url(url)
+    except ValueError as exc:
+        return {**base, 'error_code': 'invalid_configuration', 'error': str(exc)}
+    try:
+        with httpx.Client(transport=transport, follow_redirects=False) as client:
+            mcp = _Client(client, url)
+            mcp.initialize()
+            mcp.require_tool(name)
+            result = mcp.rpc('tools/call', {'name': name, 'arguments': arguments})
+        value = _extract_tool_text(result)
+    except MCPError as exc:
+        return {**base, 'error_code': exc.code, 'error': exc.message}
+    except httpx.HTTPError:
+        return {**base, 'error_code': 'network_error', 'error': '连接卖家精灵 MCP 超时或网络不可用，请稍后重试'}
+    except (ValueError, TypeError, KeyError):
+        return {**base, 'error_code': 'protocol_error', 'error': '卖家精灵 MCP 响应无法解析'}
+    payload = {'ok': True, 'remote_tool': name, 'arguments': arguments,
+               'fetched_at': base['fetched_at'], 'data': value,
+               'source': 'sellersprite_mcp'}
+    encoded = json.dumps(payload, ensure_ascii=False)
+    if len(encoded) > MAX_TOOL_RESULT_BYTES:
+        return {**base, 'error_code': 'result_too_large',
+                'error': '卖家精灵 MCP 返回结果过大，请缩小查询范围（减少对象数量或缩小时间范围）后重试'}
+    scrubbed = encoded.replace(secret, '[REDACTED]')
+    return json.loads(scrubbed)
+
+
+def catalog_for_agent(*, url='', transport=None, force=False):
+    """Project the upstream catalog into Agent-tool candidates.
+
+    Returns a list of dicts shaped for the Agent's tool builder, or an empty list
+    when the MCP is unavailable. Names are namespaced with ``TOOL_PREFIX``.
+    """
+    listed = list_tools(url=url, transport=transport, force=force)
+    if not listed.get('ok'):
+        return [], listed
+    candidates = []
+    for item in listed['tools']:
+        raw = item.get('name')
+        if not isinstance(raw, str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', raw):
+            continue
+        schema = item.get('inputSchema')
+        if not isinstance(schema, dict) or schema.get('type') != 'object':
+            schema = {'type': 'object', 'properties': {}}
+        candidates.append({'name': raw, 'projected': TOOL_PREFIX + raw,
+                           'description': str(item.get('description') or '')[:1500],
+                           'schema': schema})
+    return candidates, listed

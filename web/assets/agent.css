@@ -76,6 +76,8 @@ html[data-theme="light"] .agent-confirm-cancel:hover { background: #edf7f4; bord
 .agent-message-body li { margin: 5px 0; }
 .agent-message-body code { font-size: 11px; background: #ffffff09; border-radius: 4px; padding: 1px 4px; }
 .agent-message-body pre { overflow-x: auto; background: #070d17; padding: 10px; border-radius: 7px; white-space: pre-wrap; }
+/* Monospace bar chart: keep columns aligned, scroll instead of wrapping. */
+.agent-message-body pre.agent-chart { font-family: "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, "DejaVu Sans Mono", monospace; font-size: 11px; line-height: 1.7; background: #0a1523; border: 1px solid #8de2cc1f; padding: 12px 13px; white-space: pre; letter-spacing: 0; }
 .agent-message-body blockquote { margin: 9px 0; border-left: 2px solid #8de2cc55; padding-left: 11px; color: #9daec0; }
 .agent-table-wrap { overflow-x: auto; border: 1px solid #ffffff12; border-radius: 8px; margin: 10px 0 14px; }
 .agent-table-wrap table { border-collapse: collapse; width: 100%; font-size: 11px; min-width: 320px; }
@@ -144,6 +146,7 @@ html[data-theme="light"] .agent-message-body h3,
 html[data-theme="light"] .agent-message-body h4 { color: #15283e; }
 html[data-theme="light"] .agent-message-body code { background: #edf2f7; }
 html[data-theme="light"] .agent-message-body pre { background: #f1f5f9; }
+html[data-theme="light"] .agent-message-body pre.agent-chart { background: #f4f8fb; border-color: #cfe3dd; color: #1d3348; }
 html[data-theme="light"] .agent-message-body blockquote { color: #51647a; border-left-color: #8fc9bd; }
 html[data-theme="light"] .agent-table-wrap { border-color: #d6e1eb; }
 html[data-theme="light"] .agent-table-wrap td,
@@ -177,6 +180,15 @@ html[data-theme="light"] .agent-backdrop { background: #1b324a78; }
 .agent-skills { display: flex; flex-wrap: wrap; gap: 5px; max-height: 90px; overflow-y: auto; }
 .agent-skill { border: 1px solid #8de2cc30; border-radius: 6px; padding: 5px 8px; color: #b9dbd1; background: #8de2cc07; font-size: 10px; cursor: pointer; }
 .agent-skill:hover { border-color: var(--agent-accent); background: #8de2cc18; }
+/* Category tint: a short left bar carries the skill family at a glance. */
+.agent-skill { border-left-width: 2px; border-left-color: #8de2cc80; }
+.agent-skill[data-category="市场洞察"] { border-left-color: #6fb3f0; }
+.agent-skill[data-category="竞争研究"] { border-left-color: #f0a96f; }
+.agent-skill[data-category="选品研究"] { border-left-color: #8de2cc; }
+.agent-skill[data-category="经营测算"] { border-left-color: #d3a0ef; }
+.agent-skill[data-category="运营策略"] { border-left-color: #f08fae; }
+.agent-skill[data-category="用户研究"] { border-left-color: #f2d06b; }
+.agent-skill[data-category="附件研究"] { border-left-color: #9fb4c9; }
 .agent-skill-hint { color: #8c9aaf; font-size: 9px; line-height: 1.6; margin: 6px 0 0; }
 .agent-slash-suggestions { position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; max-height: min(280px, 35dvh); overflow-y: auto; z-index: 1; padding: 5px; border: 1px solid #8de2cc60; border-radius: 10px; background: #182332; box-shadow: 0 8px 25px #0005; }
 .agent-slash-option { display: block; width: 100%; padding: 9px; text-align: left; border: 0; border-radius: 6px; background: transparent; color: #d4dfeb; cursor: pointer; }
@@ -192,6 +204,13 @@ html[data-theme="light"] .agent-attachment.error small { color: #855a18; }
 html[data-theme="light"] .agent-attachment-remove,html[data-theme="light"] .agent-attachment-retry,html[data-theme="light"] .agent-upload { color: #425c70; }
 html[data-theme="light"] .agent-upload { border-color: #cbd9e5; }
 html[data-theme="light"] .agent-skill { color: #086a62; background: #f2f8f6; border-color: #b8d6d1; }
+html[data-theme="light"] .agent-skill[data-category="市场洞察"] { border-left-color: #2f7fd0; }
+html[data-theme="light"] .agent-skill[data-category="竞争研究"] { border-left-color: #c9711f; }
+html[data-theme="light"] .agent-skill[data-category="选品研究"] { border-left-color: #0f8f78; }
+html[data-theme="light"] .agent-skill[data-category="经营测算"] { border-left-color: #8a4fc0; }
+html[data-theme="light"] .agent-skill[data-category="运营策略"] { border-left-color: #c9476f; }
+html[data-theme="light"] .agent-skill[data-category="用户研究"] { border-left-color: #b58a12; }
+html[data-theme="light"] .agent-skill[data-category="附件研究"] { border-left-color: #5b7a94; }
 html[data-theme="light"] .agent-skill:hover,html[data-theme="light"] .agent-attachment-remove:hover,html[data-theme="light"] .agent-attachment-retry:hover { background: #e8f7f3; }
 html[data-theme="light"] .agent-slash-suggestions { background: #fff; border-color: #b8d6d1; box-shadow: 0 8px 25px #17355420; }
 html[data-theme="light"] .agent-slash-option { color: #243a51; }

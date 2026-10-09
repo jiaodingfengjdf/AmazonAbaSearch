@@ -32,7 +32,11 @@ class AgentSkillsTest(unittest.TestCase):
                 self.assertEqual(resolved["title"], item["title"])
                 self.assertEqual(resolved["arguments"], "")
                 self.assertIn("全部已采集历史周期、全部类目", resolved["instructions"])
-                self.assertIn("12 次、6 轮", resolved["instructions"])
+                # The triple-identity framing and local-first tool policy ship with every skill.
+                self.assertIn("数据分析工程师", resolved["instructions"])
+                self.assertIn("市场调研专家", resolved["instructions"])
+                self.assertIn("选品专家", resolved["instructions"])
+                self.assertIn("本地 ABA 数据库能回答的先用本地工具", resolved["instructions"])
                 _, body = agent_skills._load(item["id"])
                 self.assertTrue(resolved["instructions"].endswith(body))
 
@@ -46,8 +50,24 @@ class AgentSkillsTest(unittest.TestCase):
         self.assertIn("不得静默退回", parsed["instructions"])
 
     def test_ordinary_chat_is_not_routed(self):
-        for text in ("分析 serum", "这里引用 /keyword serum", "https://example.com/asin", "我想比较 /profit 与 /ads"):
+        for text in ("分析 serum", "这里引用 /keyword serum", "https://example.com/asin", "我想比较 /profit 与 /ads",
+                     "帮我看看关键词深度研究", "请分析一下竞争格局研究这个方法", "关键词深度研究法"):
             self.assertIsNone(agent_skills.resolve(text))
+
+    def test_chinese_title_routes_like_the_slash_command(self):
+        # A chip click fills "关键词深度研究 owala"; it must load the same skill.
+        parsed = agent_skills.resolve("关键词深度研究 owala 水杯")
+        self.assertEqual(parsed["id"], "keyword")
+        self.assertEqual(parsed["title"], "关键词深度研究")
+        self.assertEqual(parsed["arguments"], "owala 水杯")
+        self.assertIn("全部已采集历史周期、全部类目", parsed["instructions"])
+        # Bare title with no object still routes, with empty arguments.
+        bare = agent_skills.resolve("评论分析")
+        self.assertEqual(bare["id"], "reviews")
+        self.assertEqual(bare["arguments"], "")
+        # Longest title wins: "全流程选品研究" is not shadowed by "选品研究".
+        self.assertEqual(agent_skills.resolve("全流程选品研究 露营灯")["id"], "selection")
+        self.assertEqual(agent_skills.resolve("利润与单位经济研究 B0D3LGT8M3")["id"], "profit")
 
     def test_command_must_be_exact_and_allowlisted(self):
         attempts = ("/", "/unknown", "/KEYWORD serum", "/keyword-extra serum",

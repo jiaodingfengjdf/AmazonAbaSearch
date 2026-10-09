@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../web/assets/agent.js'), 'utf8').replace(/\r\n/g, '\n');
 class Element {
-  constructor(tag = 'div') { this.tagName = tag; this.children = []; this.value = ''; this.hidden = false; this.attrs = {}; this.listeners = {}; this.classList = { add() {}, remove() {}, contains: () => false }; }
+  constructor(tag = 'div') { this.tagName = tag; this.children = []; this.value = ''; this.hidden = false; this.attrs = {}; this.listeners = {}; this.dataset = {}; this.classList = { add() {}, remove() {}, contains: () => false }; }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this.children = items; }
   setAttribute(k, v) { this.attrs[k] = v; }
@@ -43,13 +43,24 @@ function file(name = 'report.csv', size = 80) { return { name, size, type: 'text
 test('skills select on click and slash Enter/Tab without sending prematurely', async () => {
   const s = await setup(() => { throw new Error('unexpected send'); });
   assert.equal(s.get('agentSkills').children.length, 1);
-  s.get('agentSkills').children[0].onclick();
-  assert.equal(s.get('agentInput').value, '/market ');
+  const button = s.get('agentSkills').children[0];
+  // The chip shows the Chinese title, not the raw /english command.
+  assert.equal(button.textContent, '市场研究');
+  assert.equal(button.dataset.skillId, 'market');
+  button.onclick();
+  // Clicking fills only the skill name plus a trailing space, ready for the object.
+  assert.equal(s.get('agentInput').value, '市场研究 ');
+  // An object the user already typed is kept after the skill name.
+  s.get('agentInput').value = 'owala 水杯';
+  button.onclick();
+  assert.equal(s.get('agentInput').value, '市场研究 owala 水杯');
+  // Typing a slash still offers every skill, matched by Chinese title too.
   for (const key of ['Enter', 'Tab']) {
-    s.get('agentInput').value = '/ma'; s.get('agentInput').oninput();
+    s.get('agentInput').value = '/市场'; s.get('agentInput').oninput();
     let prevented = false;
     s.get('agentInput').onkeydown({ key, preventDefault: () => { prevented = true; } });
-    assert.equal(prevented, true); assert.equal(s.get('agentInput').value, '/market ');
+    assert.equal(prevented, true);
+    assert.equal(s.get('agentInput').value, '市场研究 ');
   }
   assert.equal(s.calls.filter(c => c.url.endsWith('/chat')).length, 0);
 });

@@ -7,7 +7,7 @@
   <link rel="icon" href="data:," />
   <script>try { document.documentElement.dataset.theme = localStorage.getItem('aba-theme') === 'dark' ? 'dark' : 'light'; } catch (_) {}</script>
   <link rel="stylesheet" href="assets/style.css?v=19" />
-  <link rel="stylesheet" href="assets/agent.css?v=8" />
+  <link rel="stylesheet" href="assets/agent.css?v=9" />
 </head>
 <body>
   <div class="bg-glow" aria-hidden="true"></div>
@@ -114,7 +114,7 @@
       <button id="agentNew" class="agent-icon-btn agent-new-btn" title="新建对话" aria-label="新建对话">＋ 新建</button>
       <button id="agentClose" class="agent-icon-btn" title="收起面板" aria-label="收起研究员面板">×</button>
     </header>
-    <div class="agent-specialties"><span>数据分析工程师</span><span>市场调研专家</span><span>亚马逊选品专家</span></div>
+    <div class="agent-specialties"><span>数据分析工程师</span><span>市场调研专家</span><span>亚马逊选品专家</span><span>高级亚马逊运营专家</span></div>
     <div class="agent-conversation-bar"><label class="agent-sr-only" for="agentConversations">选择对话</label><select id="agentConversations" title="切换已保存的对话"></select><button id="agentClear" type="button" title="清除当前对话">清除对话</button></div>
     <div id="agentMessages" class="agent-messages" role="log" aria-label="分析对话" aria-live="off">
       <section id="agentWelcome" class="agent-welcome">
@@ -127,13 +127,13 @@
       <div id="agentAttachments" class="agent-attachments" aria-label="本对话参与分析的附件"></div>
       <p id="agentAttachmentHelp" class="agent-attachment-help" hidden>附件已上传，随本次消息发送；发送后移入对话记录，可继续追问。</p>
       <label for="agentInput" class="agent-sr-only">输入分析问题</label>
-      <textarea id="agentInput" rows="3" maxlength="6000" placeholder="输入 / 选择技能，或填写关键词、ASIN、选品方向；支持粘贴图片" aria-describedby="agentComposerHelp" aria-controls="agentSlashSuggestions" aria-expanded="false" aria-autocomplete="list"></textarea>
+      <textarea id="agentInput" rows="3" maxlength="6000" placeholder="直接描述你要研究的问题，或点击下方技能、输入 / 查看全部技能；支持粘贴图片" aria-describedby="agentComposerHelp" aria-controls="agentSlashSuggestions" aria-expanded="false" aria-autocomplete="list"></textarea>
       <div id="agentSlashSuggestions" class="agent-slash-suggestions" role="listbox" aria-label="研究技能" hidden></div>
       <input id="agentImageInput" type="file" class="agent-sr-only" accept=".png,.jpg,.jpeg,.webp,.gif" multiple tabindex="-1" />
       <input id="agentFileInput" type="file" class="agent-sr-only" accept=".pdf,.xlsx,.csv,.txt,.md,.docx" multiple tabindex="-1" />
       <div class="agent-composer-actions"><button id="agentImageUpload" type="button" class="btn agent-upload" title="上传图片：PNG、JPG、JPEG、WEBP、GIF；每个文件最大 20 MB">＋ 图片</button><button id="agentUpload" type="button" class="btn agent-upload" title="上传文件：PDF、XLSX、CSV、TXT、MD、DOCX；每个文件最大 20 MB">＋ 文件</button><span id="agentComposerHelp">Enter 发送 · Shift + Enter 换行</span><button id="agentStop" type="button" class="btn" hidden>停止生成</button><button id="agentSend" type="submit" class="btn agent-send">发送 ↑</button></div>
     </form>
-    <div class="agent-skill-area"><span class="agent-skill-label">研究技能</span><div id="agentSkills" class="agent-skills" aria-label="选择技能并补充研究对象"></div><p class="agent-skill-hint">点击填入指令后，补充关键词、ASIN 或选品方向。</p></div>
+    <div class="agent-skill-area"><span class="agent-skill-label">研究技能 · 点击后补充研究对象</span><div id="agentSkills" class="agent-skills" aria-label="选择技能并补充研究对象"></div><p class="agent-skill-hint">点击技能填入名称，接着输入 ASIN、关键词、类目或产品方向即可；也可输入 / 查看全部技能。</p></div>
     <footer class="agent-footer"><span>DeepSeek · 基于已采集数据分析</span><button id="agentExport" type="button">导出对话 ↓</button></footer>
   </aside>
 
@@ -150,6 +150,6 @@
 
   <script src="assets/vendor/echarts.min.js"></script>
   <script src="assets/app.js?v=25"></script>
-  <script src="assets/agent.js?v=10"></script>
+  <script src="assets/agent.js?v=12"></script>
 </body>
 </html>

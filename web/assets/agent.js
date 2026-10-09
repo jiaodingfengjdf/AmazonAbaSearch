@@ -96,15 +96,25 @@
   }
   function renderSkills() {
     el('agentSkills').replaceChildren(...skills.map(skill => {
-      const button = node('button', 'agent-skill', skill.title); button.type = 'button';
-      button.title = `/${skill.id} · ${skill.description}${skill.hint ? '\n' + skill.hint : ''}`;
+      const button = node('button', 'agent-skill', skill.title);
+      button.type = 'button';
+      button.dataset.skillId = skill.id;
+      button.dataset.category = skill.category || '';
+      button.title = `${skill.title}（${skill.category}）\n${skill.description}${skill.hint ? '\n提示：' + skill.hint : ''}\n高级用法：/${skill.id} 关键词或ASIN`;
       button.onclick = () => selectSkill(skill); return button;
     }));
     updateSuggestions();
   }
+  function skillPrompt(skill) {
+    // Only the Chinese skill name plus a trailing space; the user types the
+    // object (ASIN / keyword / category) right after it.
+    return `${skill.title} `;
+  }
   function selectSkill(skill) {
-    const command = `/${skill.id} `;
-    input.value = /^\/[^\s]*\s?/.test(input.value) ? input.value.replace(/^\/[^\s]*\s?/, command) : command + input.value;
+    // Fill the Chinese skill name; keep whatever the user already typed so
+    // "owala" + clicking a skill becomes "关键词深度研究 owala".
+    const existing = input.value.replace(/^\/[^\s]*\s?/, '').trim();
+    input.value = existing ? `${skill.title} ${existing}` : skillPrompt(skill);
     input.focus(); input.setSelectionRange(input.value.length, input.value.length);
     hideSuggestions(); updateControls();
   }
@@ -114,7 +124,9 @@
   }
   function updateSuggestions() {
     const match = input.value.match(/^\/([^\s]*)$/);
-    suggestions = match && !active ? skills.filter(s => s.id.includes(match[1].toLowerCase()) || s.title.includes(match[1])) : [];
+    // Match on the Chinese title too, so users can type /广告 and still find it.
+    suggestions = match && !active ? skills.filter(s => s.id.includes(match[1].toLowerCase())
+      || s.title.includes(match[1]) || (s.category || '').includes(match[1])) : [];
     suggestionIndex = 0; paintSuggestions();
   }
   function paintSuggestions() {
@@ -123,7 +135,7 @@
     list.replaceChildren(...suggestions.map((skill, index) => {
       const option = node('button', 'agent-slash-option'); option.type = 'button'; option.id = `agentSkillOption${index}`;
       option.setAttribute('role', 'option'); option.setAttribute('aria-selected', String(index === suggestionIndex)); option.tabIndex = -1;
-      option.append(node('strong', '', `/${skill.id} · ${skill.title}`), node('small', '', skill.hint || skill.description));
+      option.append(node('strong', '', skill.title), node('small', '', skill.hint || skill.description));
       option.onclick = () => selectSkill(skill); return option;
     }));
     if (suggestions.length) {
@@ -171,9 +183,11 @@
       const line = lines[i];
       if (!line.trim()) continue;
       if (line.startsWith('```')) {
+        const language = line.slice(3).trim().toLowerCase();
         const code = [];
         while (++i < lines.length && !lines[i].startsWith('```')) code.push(lines[i]);
-        root.append(node('pre', '', code.join('\n')));
+        // A ```chart fence renders as a monospace bar-chart block; text stays text.
+        root.append(node('pre', language === 'chart' ? 'agent-chart' : '', code.join('\n')));
       } else if (separator(lines[i + 1])) {
         const wrap = node('div', 'agent-table-wrap'), table = node('table');
         const header = node('tr');
@@ -389,6 +403,7 @@
         };
       }
       const period = source.scope?.period === 'live_review_sample' ? '评论样本'
+        : source.scope?.period === 'live_sellersprite_query' ? '卖家精灵实时'
         : source.scope?.period === 'user_uploaded_files' ? '上传附件'
         : source.week ? source.week.replace('ara_', '') : '全周期';
       row.append(a, node('span', '', period));
